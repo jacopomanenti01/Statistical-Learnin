@@ -1,0 +1,447 @@
+---
+title: 'Statistical Learning, Homework #2'
+author: "Jacopo Manenti, id: 247279"
+date: "May 02, 2024"
+format:
+    pdf:
+        code-overflow: scroll
+        toc: false
+        number-sections: true
+        colorlinks: true
+        include-in-header:
+            text: |
+                \usepackage{fvextra}
+                \DefineVerbatimEnvironment{Highlighting}{Verbatim}{breaklines,commandchars=\\\{\}}
+                \DefineVerbatimEnvironment{OutputCode}{Verbatim}{breaklines,commandchars=\\\{\}}
+    html:
+        code-overflow: scroll
+        theme: cosmo
+        df-print: paged
+        toc: true
+        toc-location: left
+  
+knitr:
+      opts_chunk:
+        warning: false
+        message: false
+        tidy: true
+        tidy.opts:
+            width.cutoff: 60
+editor_options:
+  chunk_output_type: console
+---
+
+
+```{r}
+#| label: setup
+#| include: false
+library(conflicted)
+conflicts_prefer(dplyr::select())
+
+# built-in output hook
+hook_output <- knitr::knit_hooks$get("output")
+# custom chunk option output.lines to truncate text output
+knitr::knit_hooks$set(output = function(x, options) {
+  n <- options$output.lines
+  if (!is.null(n)) {
+      x <- xfun::split_lines(x)
+      if(length(x) > n) {
+          top <- head(x, n)
+          bot <- tail(x, n)
+          x <- c(top, "\n....\n", bot)
+      }
+      x <- paste(x, collapse="\n")
+  }
+  hook_output(x, options)
+})
+```
+
+```{r}
+#| label: library
+#| include: false
+# Package names
+packages <- c("tidyverse", "dplyr","ISLR2", "glmnet", "tree","randomForest","rsample","gbm", "dismo","caret","gridExtra")
+
+# Install packages not yet installed
+installed_packages <- packages %in% rownames(installed.packages())
+if (any(installed_packages == FALSE)) {
+  install.packages(packages[!installed_packages])
+}
+
+# Packages loading
+invisible(lapply(packages, library, character.only = TRUE))
+```
+
+# Introduction and Data Exploration
+
+In this study, we investigate the prediction of prostate-specific antigen (PSA) value, measured in ng/ml on a logarithmic scale (lpsa), a protein primarily produced by cells within the prostate gland. Elevated levels of PSA may indicate the presence of cancer or other prostate-related conditions. To predict it, we will assess and fit three distinct models: pruned decision tree, random forest, and boosted decision tree. Subsequently, we will evaulate their performance in the final stage and opt for the model exhibiting the lowest test error.
+
+This research is conducted using clinical measurements collected from 97 men scheduled to undergo radical prostatectomy, with the dataset stored in "prostate.csv". We commence by identifying and addressing any missing data and factorizing  **svi** and **gleason** predictors. It's important to note that variables such as **lcavol**, **lweight**, and **lbph** are logarithmically transformed.
+
+```{r}
+#| label: dataset
+#| echo: false
+# import data
+cancer <- read.csv("prostate.csv") # import data 
+# no missing data
+print(paste("Number of na valuse: ",sum(is.na(cancer))))
+# refactor
+cancer <- cancer %>%
+  mutate(svi = factor(svi),
+         gleason = factor(gleason))
+# print dataset
+head(cancer, 4)
+```
+
+# Fit a decision tree
+
+The first model we are going to see is a fully grown decision tree using the entire dataset. These models are straightforward and valuable for interpretation. As illustrated in the figure below, they comprise a series of splitting rules starting from the top of the tree and progressing to the bottom. By visualizing the summary, we can extract useful insights.
+
+```{r}
+#| label: raw decision tree
+# fit a regression tree
+tree.df <- tree(lpsa ~ ., data = cancer)
+summary(tree.df)
+```
+
+```{r}
+#| label: rmd
+#| include: false
+# save rmd in a variable
+rmd <- summary(tree.df)$dev/summary(tree.df)$df
+```
+
+The summary outlines that the tree has 9 terminal nodes where predictions are taken, and it employed just 3 out of 8 were variables: the cancer's volume (cm3), the prostate weight (in g), the percentage of Gleason score 4 or 5 over the entire patient's clinical history. Additionally, the summary provide us with the residual mean deviance, a gauge of model fitting, which stands at `r rmd`. For a better understanding, we can plot the tree and visualize it.
+
+```{r}
+#| label: plot raw decision tree
+#| echo: false
+
+plot(tree.df)
+text(tree.df,cex = 0.6, adj = c(0.5, 0.5), pretty=1)
+title(main="Cancer: Unpruned regression tree")
+```
+
+Decision tree indicates higher prostate antigen levels for larger cancer volumes ($lcavol >= e^{2.46}$), higher Gleason scores ($pgg45 >= 7.5$), and lower prostate weights ($lweight < e^{3.83}$). For example, for a patient with a cancer volume between $e^{-0.47}$ and $e^{2.46}$ and a prostate weight $>= e^{3.83}$, the predicted antigen level is $e^{2.75}$, or 15.64 ng/ml. Generally, PSA levels below 4.0 ng/ml are considered normal for men. In this case, the test would suggest the presence of prostate condition or cancer.
+
+However, decision trees suffer from high variance, particularly with frequent splits like ours (9 splits), which can result in overfitting and poor test set performance. Pruning the tree after it has fully grown is a common solution to determine the optimal complexity. We use cross-validation to find the best number of terminal nodes, selecting the one with the lowest CV error. Additionally, we visualize this process by plotting the CV error against `size`.
+
+```{r}
+#| label: pruning raw recision tree
+# Set seed for reproducible results
+set.seed(1)
+# performing cv on the full grown tree
+cv.cancer <- cv.tree(object=tree.df)
+# retrive the best size
+opt.size <- cv.cancer$size[which.min(cv.cancer$dev)] 
+# prune the tree 
+prune_cancer <- prune.tree(tree.df, best=opt.size)
+summary(prune_cancer)
+```
+Cross-validation favored a simpler tree, with  `r opt.size` terminal nodes. We also observe a rise in residual mean deviance from 0.41 to 0.56, suggesting a worsened model fit. This is due to raw decision trees' tendency to overfit the dataset. Pruning aims to balance bias and variance, potentially enhancing model performance. Lastly, only $lcavol$ and $lweight$ were significant this time. This leads to an easier intrepretation of the model.
+
+```{r}
+#| label: plot pruning raw recision tree
+#| echo: false
+#| fig-cap: "Left: cross-validation for selecting the size; Right: pruned tree  distinguishes patients by cancer volume: above $e^{2.46}$ cm³, below $e^{-0.47}$ cm³, and within the latter group, by prostate weight: above $e^{3.68}$ and below. Predicted PSA levels for these groups are $e^{3.7650} = 43.16$, $e^{0.6017} = 1.82$, $e^{2.7120} = 15.02$, and $e^{2.0330} = 7.63$."
+
+# plot 
+#op <- par(mfrow=c(1, 2))
+op <- par(mfrow=c(1, 2))
+plot(cv.cancer$size, cv.cancer$dev, type="b", xlab = "size",ylab = "deviance")
+title(main="CV: Deviance vs Size")
+points(opt.size, cv.cancer$dev[which.min(cv.cancer$dev)], col = "green",  cex = 2, pch = 20)
+plot(prune_cancer)
+text(prune_cancer, pretty=0, cex = 0.9)
+title(main="Cancer: Pruned tree")
+par(op)
+```
+
+
+# Fit a random forest {#sec-rf}
+
+The second model we fit is random forest, an ensemble method that leverages the concept of averaging **decorrelated** predictions from diverse decision trees to reduce variance and enhance prediction accuracy. Decorrelation implies carefully selecting the number of predictors to consider at each split. In our scenario, this ranges from 1 to 7, as using all 8 predictors would essentially revert to bagging. The rule of thumb in regression is to use $p/3$ variables, which in our case would be $\approx 2$. However, a better approach involves treating it (**mtry**) as a tuning parameter and finding its optimal value through cross-validation, selecting the one associated with the lowest CV error. The algorithm uses 5 folds and 500 trees.
+
+```{r}
+#| label: mse function
+#| include: false
+compute_mse <- function(preds, truth) {
+    mean((preds - truth)^2)
+}
+```
+
+```{r }
+set.seed(1)
+# create 5 folds
+rf_folds = createFolds(cancer$lpsa, k = 5, list = FALSE)
+# initialize hyperparameter sequence and mse matrix
+v.mrty <- 1:7
+rf.mse <- matrix(0, nrow = 5, ncol = 7)
+# loop
+for(i in 1:5){
+  # split dataset into training set and test set
+  cancer_idx = which(rf_folds == i)
+  cancer_trn = cancer[-cancer_idx,]
+  cancer_tst = cancer[cancer_idx,]
+  # loop over the hyperparameter values for each fold 
+  for(j in v.mrty){
+    rf.cancer <- randomForest(lpsa ~ ., data=cancer_trn, mtry=j, importance=TRUE)
+    pred <- predict(rf.cancer, newdata=cancer_tst)
+    rf.mse[i, j]<- compute_mse(pred, cancer_tst$lpsa)
+  }
+}
+# compute for each hyperparameter value the cv error
+cv.mse.rf <- apply(rf.mse, FUN=mean, MARGIN = 2)
+# return the optimal value of the hyperparameter and the lowest cv-error
+opt.mrty <-which.min(cv.mse.rf)
+min_val_rf <- round(min(cv.mse.rf),4)
+```
+
+```{r}
+#| label: plt rf
+#| echo: false
+#| fig-cap: " "
+
+# set x axis and y axis values
+x_val <- c(1: 7)
+# plot
+plot(x_val, y= cv.mse.rf, xlab="mtry" , ylab="MSE", type = "b")
+abline(v=opt.mrty,col = "red", lty = 2)
+points(opt.mrty,min_val_rf, col = "green", cex = 2, pch = 20)
+text(opt.mrty,min_val_rf, labels = paste("Min MSE:", min_val_rf), pos = 3, col = "black",cex = 0.9)
+title(main="CV: MSE vs mtry")
+```
+
+The figure shows the CV error based on the number of variables used for each split, with a vertical line indicating the optimal **mtry** value. These results suggest selecting a random forest generated by utilizing 500 trees and 6 variables for each split.
+
+After optimizing the model, we refit it to analyze each predictor's importance. However, the interpretability is limited compared to a single decision tree, as visualizing the entire forest is impractical.
+
+```{r}
+#| label: rf importance
+#| echo: false
+#| fig-cap: "The straight line represents the increase in prediction error (MSE), while the circle indicates the node purity (both when the predictor is included and excluded). The results align with previous decision trees: both lcavol and lweight are identified as significant predictors of the protein's level. However, an additional predictor, previously overlooked, such as svi (seminal vesicle invasion), has now emerged as influential. For instance, removing svi leads to an approximate 9% increase in MSE and a 10% increase in node impurity."
+set.seed(1)
+rf.cancer <- randomForest(lpsa ~ ., data = cancer, mtry = opt.mrty, importance = TRUE)
+ImpData <- as.data.frame(importance(rf.cancer))
+ImpData$Var.Names <- row.names(ImpData)
+
+ggplot(ImpData, aes(x=Var.Names, y=`%IncMSE`)) +
+  geom_segment( aes(x=Var.Names, xend=Var.Names, y=0, yend=`%IncMSE`), color="skyblue") +
+  geom_point(aes(size = IncNodePurity), color="blue", alpha=0.6) +
+  theme_light() +
+  coord_flip() +
+  theme(
+    legend.position="bottom",
+    panel.grid.major.y = element_blank(),
+    panel.border = element_blank(),
+    axis.ticks.y = element_blank()
+  )
+
+```
+
+The findings in Figure 2 are logical, as these factors significantly influence PSA production and are crucial indicators of prostatic conditions, including cancer. Thus, including them in the PSA prediction model enhances accuracy.
+
+
+# Fit a boosted regression tree
+
+Finally, we apply boosting regression trees, which construct trees sequentially using information from previous trees. Specifically, we use regression gradient boosting (**BRT**). Similar to random forest, BRT requires preliminary hyperparameter tuning, including selecting optimal values for the learning rate, tree complexity, and number of trees. We determine the optimal number of trees through cross-validation [^1], keeping the first parameter as default and aiming for simplicity with only a few splits, typically resulting in three or four regions. 
+
+[^1]: No boosting cross-validation code reported, as requires little changes from loop in @sec-rf in the fitting function (gbm) and hyperparameter sequence from 50 to 2000. See GitHub for details.
+```{r}
+#| include: false
+#| label: cv_bg
+
+
+set.seed(1)
+# split 
+gb_folds <-  createFolds(cancer$lpsa, k = 5, list = FALSE)
+v.ntrees <- c(50, 100, 250, 500, 750, 1000, 1250, 1500, 1750, 2000)
+bg.mse <- matrix(0, nrow = 5, ncol = 10)
+# loop
+for(i in 1:5){
+  # split dataset into training set and test set
+  cancer_idx = which(gb_folds == i)
+  cancer_trn = cancer[-cancer_idx,]
+  cancer_tst = cancer[cancer_idx,]
+  for(j in 1:10){
+    n <- v.ntrees[j]
+    bg.cancer <- gbm(lpsa ~ ., data=cancer_trn, distribution="gaussian",
+               n.trees=n, interaction.depth=3, shrinkage= 0.01)
+    
+    pred <- predict(bg.cancer, newdata=cancer_tst, n.trees=n )
+    bg.mse[i, j]<- compute_mse(pred, cancer_tst$lpsa)
+    
+  }
+}
+
+cv.mse.bg <- apply(bg.mse, FUN=mean, MARGIN = 2)
+
+# return the mrty associated with the lowest cv-error
+opt.ntrees <-v.ntrees[which.min(cv.mse.bg)]
+# return the  lowest cv-error
+min_val_bg <- round(min(cv.mse.bg),4)
+
+```
+
+```{r}
+#| echo: false
+#| label: fig-plotbg
+#| fig-cap: "shows the CV error based on the number of trees used, with a vertical line indicating the optimal **ntrees** value. These results suggest selecting a boosting decision tree utilizing 250 trees, learning rate of 0.01, complexity of 3."
+
+# set x axis and y axis values
+x_val <- c(1: 10)
+# plot
+plot(v.ntrees, y= cv.mse.bg, xlab="n.trees" , ylab="MSE", type = "b")
+axis(side = 1, at = v.ntrees, labels = v.ntrees)
+abline(v=opt.ntrees,col = "red", lty = 2)
+text(opt.ntrees,min_val_bg, labels = paste("Min MSE:", min_val_bg), pos = 4, col = "black", cex = 0.8)
+title(main="CV: MSE vs n.trees")
+```
+
+As done with random forest, we refit the model with the optimal configuration and analyze each predictor's importance. 
+
+```{r}
+set.seed(1)
+# fit the optimal boosting model
+boosted <- gbm( lpsa~ ., data=cancer, distribution="gaussian",n.trees=opt.ntrees, interaction.depth=4)
+knitr::kable(summary(boosted, plotit = FALSE, order = TRUE))
+```
+
+The table ranks variables by their *relative influence*, indicating their importance in the model. Both **lcavol** and **lweight** are key features, contributing 29% and 24% to the loss function reduction, respectively. These results align with previous findings from random forest. However, **age** is found to be more important than **pgg45** and **svi**. This conclusion seems reasonable, as age influences the normal level of PSA production in men, which typically decreases with age. Therefore, if two individuals have the same level of PSA but different ages, the older individual may face a higher risk.
+
+
+# Compare the performance
+
+Once we have assessed the optimal configuration for each of our three models, we may consider proceeding with selecting the best model in terms of prediction's performance. However, these models have been optimized using the entire data set. Therefore, model selection would use the same data to tune model parameters and evaluate model performance, yielding an overly-optimistic score. To mitigate this issue, we employ nested cross-validation (CV), which involves a series of train/validation/test set partitions. This approach an inner loop for model tuning and outer loop for computing the generalization error.
+
+In our scenario, both the inner and outer loops utilize 5-fold cross-validation. We will optimize the model based on specific hyperparameters: **mtry** for random forests, **n.trees** for boosting (while retaining default values for other tuning parameters), and **k** as the complexity parameter for pruning.
+
+
+```{r}
+#| echo: true
+#| output: false
+#| code-fold: true
+#| code-summary: "prova"
+
+set.seed(1)
+
+# split the data into 5 folds
+cancer_folds = createFolds(cancer$lpsa, k = 5, list = FALSE)
+# set the traincontrol
+cv_5 = trainControl(method = "cv", 
+                    number = 5,
+                    search = "grid")
+
+# collect the predict score got from CV.
+predicted_rf = matrix(0, nrow=5, ncol = 1)
+predicted_bg = matrix(0, nrow=5, ncol = 1)
+predicted_pr = matrix(0, nrow=5, ncol = 1)
+
+# set the grid for hyperparamenters' values
+tune_grid_rf <- expand.grid(mtry = 1:7)
+tune_grid_gb <- expand.grid(n.trees = seq(50,1000,length=10),interaction.depth = 3,shrinkage = 0.01,n.minobsinnode = 10)
+tune_grid_pr <- expand.grid(cp = seq(0.5,10,length=5))
+
+# outer loop
+for(i in 1:5){
+  # split dataset into training set and test set
+  cancer_idx = which(cancer_folds == i)
+  cancer_trn = cancer[-cancer_idx,]
+  cancer_tst = cancer[cancer_idx,]
+
+  # inner loop for random forest
+  def_rf <-  train(
+  lpsa ~., data = cancer_trn,
+  method = "rf",
+  trControl = cv_5,
+  tuneGrid = tune_grid_rf
+  )
+  
+  # collect the predict score based on random forest optimal model
+  pred <-  predict(def_rf,newdata=cancer_tst)
+  predicted_rf[i] <- mean((cancer_tst$lpsa - pred)^2)
+  
+  # inner loop for boosted tree
+  def_bg <-  train(
+  lpsa ~., data = cancer_trn,
+  method = "gbm",
+  trControl = cv_5,
+  tuneGrid = tune_grid_gb
+  )
+  
+  # collect the predict score based on boosted tree optimal model
+  pred <-  predict(def_bg,newdata=cancer_tst)
+  predicted_bg[i] <- mean((cancer_tst$lpsa - pred)^2)
+  
+  # inner loop for cost-complexity decision tree
+  def_pr <-  train(
+  lpsa ~., data = cancer_trn,
+  method = "rpart",
+  trControl = cv_5,
+  tuneGrid = tune_grid_pr
+  )
+  
+  # collect the predict score based on ost-complexity decision tree optimal model
+  pred <-  predict(def_pr,newdata=cancer_tst)
+  predicted_pr[i] <- mean((cancer_tst$lpsa - pred)^2)
+}
+
+# retrieve the optimal number of variables for random forest
+rf.opt.mtry<- def_rf$bestTune$mtry
+# retrieve the optimal number of trees for boosting
+ns.opt.n.trees<- round(def_bg$bestTune$n.trees,0)
+# retrieve the optimal complexity for pruning
+pr.opt.k<- def_pr$bestTune$cp
+# retrive cv- test error from random forest, boosting, pruning
+rf_cv_test_error <- round(mean(predicted_rf),4)
+gb_cv_test_error <- round(mean(predicted_bg),4)
+pr_cv_test_error <- round(mean(predicted_pr),4)
+```
+
+
+```{r}
+#| include: false
+
+tree_model <- tree(lpsa ~ ., data = cancer)
+pruned_tree <- prune.tree(tree_model, k = pr.opt.k)
+summary <- summary(pruned_tree)
+```
+
+At the conclusion, we have derived the following configurations for model evaluation:
+
+-   Random Forest: a random forest employing utilizing 500 trees and `r rf.opt.mtry` variables for each split. The cv-test error is `r rf_cv_test_error`
+
+-   Boosting: a boosted tree trained with a total of `r ns.opt.n.trees` trees, learning rate of 0.01, complexity of 3. The cv-test error is `r gb_cv_test_error`
+
+-   Cost-Complexity Decision Tree: utilizing a complexity parameter set at `r pr.opt.k`, which produces a pruned tree with  `r summary$size` regions that utilizes only `r summary$used` predictor. The cv-test error is `r pr_cv_test_error`.
+
+
+# Conclusions
+
+In this study, we examined three methods for predicting prostate antigen values using clinical measurements. We started with a decision tree, then transitioned to a pruned tree to address overfitting. Additionally, we explored two ensemble methods to reduce the variance of basic decision trees. Due to the small dataset size, nested cross-validation helped select the best hyperparameters and provided an unbiased estimate of model performance. Comparing test errors, random forest showed the lowest, leading to its selection for better generalization performance. Although it may be the optimal choice, its interpretability is lower than a single decision tree, which could be critical in medical applications. Furthermore, another limitation of the analysis is related to the fact that we only tuned specific parameters of random forest and boosting, leaving some as default (e.g., learning rate in boosting), which could have influenced the model selection differently.
+
+In conclusion, we fit the selected optimal model to the entire dataset and subsequently generate predictions on a new observation to see how the it performs.
+
+```{r}
+set.seed(1)
+# new observation 
+x.new <- data.frame(lcavol = 2.90, 
+                    lweight = 3.39, 
+                    age = as.integer(52), 
+                    lbph = -1.38,
+                    svi = factor("1", levels = levels(cancer$svi)), 
+                    lcp = -2.46,
+                    gleason = factor("7", levels = levels(cancer$gleason)),
+                    pgg45 = as.integer(10), 
+                    lpsa = 5.14)
+
+# fit a the optimal random forest model
+rf <- randomForest(lpsa~.,data = cancer, mtry =rf.opt.mtry)
+# take prediction on the new observation
+pred.rf <-  round(predict(rf,newdata=x.new),4)
+
+print(paste("The model has predicted a level of log prostate antigen of", pred.rf)) 
+
+
+```
+

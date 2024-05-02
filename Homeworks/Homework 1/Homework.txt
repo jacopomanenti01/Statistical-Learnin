@@ -1,0 +1,314 @@
+---
+title: "Statistical Learning, Homework #1"
+author: "Jacopo Manenti, id: 247279"
+format: 
+      pdf: 
+        latex_engine: xelatex
+editor: visual
+---
+
+```{r}
+knitr::opts_chunk$set(warning=FALSE,
+                      message=FALSE,
+                      tidy.opts=list(width.cutoff = 80),
+                      tidy = TRUE)
+
+```
+
+First we import the libraries that will be using during the study, as well as the dataset from **bf.csv**.
+
+```{r}
+library(tidyverse)
+library(dplyr)
+library(ISLR2)
+df <- read.csv("bf.csv")
+```
+
+We start looking at the first 7 rows of the dataset, to preminarly explore the data. From this, it is clear the strucutre of data and the presence of missing values **na**.  With the help of the function **glimpse** it returns a usefull insight of the dataset structure, expecially regarding to its dimension, which is 139 observations and 10 variables.
+
+```{r}
+head(df)
+glimpse(df)
+```
+Withing the variables, **breast** is the response variabile, which represents the class were  UK's pregnat women of the study conducted were classified into. The outcome of the study could aid in targeting breastfeeding promotions towards women with a lower probability of choosing. Moreover, despite the categorical nature of the response variable "breast," which delineates various feeding practices for infants including breastfeeding and exclusive bottle feeding, it is imperative to encode it as binary values (0 and 1) to accommodate logistic regression analysis. This coding transforms "breast" into a Bernoulli variable, enabling each category to be represented by a singular binary outcome. Such encoding facilitates logistic regression to model the likelihood of belonging to one feeding category relative to the other.
+
+Before recoding, it is worth noting that the majority of predictors are categorical variables, with only **age** and **educat** being numerical. Since the variable is categorical, we can organize everything into factors with levels for classification purposes.
+
+Furthermore, missing data have been observed, primarily regarding the age of mothers and their educational attainment, particularly among those engaged in breastfeeding or bottle-feeding. The majority of missing values are noted among women of white ethnicity, suggesting potential data collection issues. With this assumption allows us to discrad records containing missing values (nota su unbalanced class potrebbe impattre)
+
+
+```{r}
+df %>% 
+  filter(!complete.cases(.)) %>% 
+  View()# see na records
+
+```
+
+At this stage, we proceed to preprocess the dataset, converting categorical variables into factors and adjusting the response variable accordingly. Following this data preparation step, we will perform basic statistical analyses and generate relevant plots. It is essential to ensure data cleanliness before proceeding with further statistical analysis.
+
+```{r}
+df <- df %>% 
+    select(names(df)) %>%
+  na.omit() %>% 
+  mutate(breast = recode(breast, 
+                         Breast = "1",
+                         Bottle = "0")) %>% 
+  mutate_if(is.character,as.factor)
+
+head(df)
+
+glimpse(df)
+attach(df)
+```
+
+# Statistical Summary
+
+Looking at the statistical summary of the features can be useful in inspecting the feature distribution and anomalies, if any.
+
+```{r}
+summary(df)
+```
+
+The dataset analysis reveals several key observations:
+
+1. **Response Variable Imbalance**: The response variable, indicating breastfeeding practices, shows a significant imbalance, with 99 out of 135 instances reporting breastfeeding.
+
+2. **Demographic Insights**: Among the 135 participants, only 21 are single, and merely 32 are current smokers. The dataset comprises patients aged between 17 and 40 years, with an average age of 18 years for discontinuing studies.
+
+3. **Limited Influence of Race**: Race does not appear to exert a substantial influence on the observed variables.
+
+In the following table it is reported the proportion for the imblacence classes
+
+```{r}
+prop.table(table(breast))
+prop.table(table(smokenow))
+prop.table(table(partner))
+```
+# Analisi delle numeric variables
+
+## Distribuzione delle numeric variables
+First, we’ll plot the histograms of numeric variables.
+
+```{r}
+hist(age)
+hist(educat)
+```
+The variable age look normal. However, it’s prudent to further investigate the feature distribution using density plots.
+
+
+```{r}
+library(ggplot2)
+
+# Calcolo della media e della deviazione standard della variabile "age"
+mean_age <- mean(df$age)
+sd_age <- sd(df$age)
+
+# Calcolo dei limiti dell'asse x
+x_min <- min(df$age)
+x_max <- max(df$age)
+
+# Creazione dei dati per la distribuzione normale
+x <- seq(x_min, x_max, length.out = 100)
+y <- dnorm(x, mean = mean_age, sd = sd_age)
+normal_data <- data.frame(x, y)
+
+# Creazione del grafico
+ggplot(df, aes(x = age)) +
+  geom_histogram(aes(y = ..density..), binwidth = 2, fill = "blue", color = "black") +
+  geom_line(data = normal_data, aes(x = x, y = y), color = "red", size = 1) +
+  xlim(x_min, x_max) +  # Imposta i limiti dell'asse x
+  labs(x = "Age", y = "Density") +
+  ggtitle("Histogram with Normal Distribution Curve")
+
+```
+The distribution of the variable **age** looks close to Gaussian distribution. Q-Q plots can also be used to evaluate normality of the features. 
+
+```{r}
+#create Q-Q plot
+ggplot(df, aes(sample = age)) +
+  stat_qq(size=1, color='red') + 
+  stat_qq_line()
+```
+We can see that the points lie mostly along the straight diagonal line with some minor deviations along each of the tails.
+
+```{r}
+shapiro.test(age)
+```
+With a p-value below 0.05, we reject the null hypothesis of normal distribution, suggesting non-normality in the data. Despite the Q-Q plot suggesting normality, the Shapiro-Wilk test disagreed, possibly due to the small sample size of 135 observations. Therefore, caution is advised in interpretation, considering the sensitivity of normality tests to sample size.
+
+
+## Looking at the relationship between numerical and target features
+
+Looking at the numerical features, we explore the relationship between demographic factors and breastfeeding practices among 135 respondents. Figure X provides a visual representation of this investigation, showcasing scatterplots illustrating the age of women (*age*) and the age at which they concluded full-time education (*educat*). Participants who breastfed their babies are distinguished in blue, while those who did not are represented in orange. Notably, a pattern emerges suggesting that individuals who breastfed tended to exhibit a higher educational attainment compared to their counterparts.
+
+Moreover, in Figure X, we present two pairs of boxplots. The first pair illustrates the distribution of age stratified by the binary breast variable, while the second pair demonstrates a similar breakdown for educat. These graphical representations underscore the notable relationship between the predictor variable *educat* and the response variable, emphasizing the significance of educational attainment in influencing breastfeeding practices.
+
+
+```{r}
+# FIGURE 4.1.
+df %>% 
+  ggplot(aes(x= age,
+             y= educat,
+             colour= breast))+
+  geom_point()+
+  labs(title="scatterplo age vs educat")+
+  theme_minimal()
+
+```
+
+In the scatterplot panel of Figure X, we have depicted the age of women and the age at which they left full-time education (educat) for all 135 respondents. Those who breastfed their baby are indicated in blue, while those who did not are in orange. It appears that individuals who breastfed tended to have a higher educational level than those who did not.
+
+In the above figure (X), two pairs of boxplots are shown. The first shows the distribution of *age* split by the binary *breast* variable; the second is a similar plot for *educat*. It is worth noting that Figure 4.1 displays a pronounced relation- ship between the predictor *educat* and the response. 
+
+
+```{r}
+boxplot(age ~ breast, data = df, col = c("lightblue", "darkorange"), xlab = "breast",
+ylab = "age")
+```
+
+The boxplot tells us that mothers who breast tend to have slightlyhigher age than the one who dont. 
+
+```{r}
+boxplot(educat ~ breast, data = df, col = c("lightblue", "darkorange"), xlab = "breast",
+ylab = "educat")
+```
+
+```{r}
+# distribution in respect of breast
+df %>% 
+  ggplot(aes(age, fill= breast))+
+  geom_density(alpha = 0.2)+
+  theme_bw()
+# distribution in respect of breast
+df %>% 
+  ggplot(aes(educat, fill= breast))+
+  geom_density(alpha = 0.2)+
+  theme_bw()
+```
+  
+
+
+# Looking at distributions of categorical features
+
+Bar plots can be used to view the distribution of categorical variables. This step may be omitted, since we already have an idea of relative frequencies of categorical variables.
+
+Calcola la distribuzione delle categorie nella variabile di risposta.
+   
+Verifica la presenza di sbilanciamento di classe, se presente.
+
+Crea grafici (ad esempio, grafici a barre) per visualizzare la distribuzione della variabile di risposta rispetto alle altre variabili.
+
+con le numeriche ok
+
+## 13. Looking at the relationship between categorical and target features
+
+Box plot is one of the best ways to visualize the relationship between a numeric and categorical feature.
+
+
+```{r}
+df %>% 
+  ggplot( aes(smokenow, fill = breast)) +
+  geom_bar(position = "dodge", stat = "count") +
+  labs(x = "Variabile Predittiva", y = "Frequenza", fill = "Variabile Risposta") +
+  ggtitle("Grafico a Barre delle Frequenze")
+  
+
+```
+
+
+
+
+
+
+#Looking at pairwise joint distribution of numeric data
+
+The last output for numeric data EDA is a pairwise joint distribution plot.
+
+To generate further insights, we ran the function numeric_eda and added a parameter hue=‘DayOfWeek’. This allows us to color our pairwise plot by each day of the week.
+
+```{r}
+pairs(df)
+```
+
+Let's quantify by computing pairwise correlations. Of course if we try that we get an error: there is a qualitative, non-numeric column (Direction) in the dataframe. Remove it and recompute the correlations:
+
+
+```{r}
+df %>% 
+  select(!is.factor) %>% 
+    cor()
+```
+
+and for categorical data
+
+To analyzed the correlation between categorical variable we can proceed with chisq test
+
+#2,2
+
+```{r}
+# select categorical variables
+plot_names <- df %>%
+  select_if(is.factor) %>%
+   select(-breast)
+
+# create a grid
+# Inizializza una lista per memorizzare i grafici
+plots_list <- list()
+
+
+# plot categorical variables
+grid.arrange(
+for (i in names(plot_names)){
+  tbl <- table(plot_names[[i]],breast)
+  br <- barplot(tbl, xlab = "Breadfist method", ylab = paste(i, "counts"), main="test", beside = TRUE, col = c("red","pink"))
+  plots_list <- br
+
+} ,
+nrow = 3,
+  top = "Title of the page")
+
+
+```
+A bar plot can suggest a potential correlation between two categorical variables if it exhibits significant differences in bar heights across variable categories. Consistent disparities in bar heights between variable categories may indicate an association between them. Additionally, the presence of a clear trend or pattern in bar heights could imply a correlation between the variables. However, it is crucial to note that the bar plot alone does not offer definitive evidence of correlation, and further statistical analysis may be required to confirm such an association.
+
+
+For this reason we proceede comparing correlation between the response variable and the categorical predictors throguh the chi-sqaure test.
+
+The chi-square test assesses the association between categorical variables by comparing observed and expected frequencies. The hypotheses include the null hypothesis of independence and the alternative hypothesis of association. The null hypothesis is rejected if the p-value is below the chosen significance level, indicating a significant association between the variables.
+```{r}
+
+# Inizializza un dataframe vuoto per memorizzare i risultati
+
+all_var <- all_chi_s <- all_p_val <- c()
+
+# # Ciclo per calcolare il chi-quadro e memorizzare i risultati nel dataframe
+
+
+for (i in names(plot_names)){
+    tbl <- table(plot_names[[i]],breast)
+    chi_sq<- chisq.test(tbl)
+    
+    # all in one dataset
+    all_var <- append(all_var, i)
+    all_chi_s <- append(all_chi_s, chi_sq$statistic)
+    all_p_val <-append(all_p_val,round(chi_sq$p.value, 6))
+}
+
+test_df <- data.frame(
+  Variable = all_var,
+  Chi_squared = all_chi_s,
+  P_value = all_p_val
+)
+
+
+```
+
+The chi-square test results indicate statistically significant associations between breastfeeding method and variables such as method of feeding (p = 0.0057), smoking status (p < 0.001), and ethnicity (p = 0.000016). Conversely, no significant association is found with pregnancy (p = 0.968) and partner status (p = 0.119). These findings emphasize the diverse influences shaping breastfeeding practices, with implications for understanding and promoting optimal infant feeding behaviors across different demographic groups.
+
+
+
+
+
+
+
+
