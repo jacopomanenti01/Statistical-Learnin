@@ -3,6 +3,7 @@ title: 'Statistical Learning, Homework #2'
 author: "Jacopo Manenti, id: 247279"
 date: "May 02, 2024"
 format:
+  
     pdf:
         code-overflow: scroll
         toc: false
@@ -19,7 +20,6 @@ format:
         df-print: paged
         toc: true
         toc-location: left
-  
 knitr:
       opts_chunk:
         warning: false
@@ -246,7 +246,7 @@ The findings in Figure 2 are logical, as these factors significantly influence P
 
 Finally, we apply boosting regression trees, which construct trees sequentially using information from previous trees. Specifically, we use regression gradient boosting (**BRT**). Similar to random forest, BRT requires preliminary hyperparameter tuning, including selecting optimal values for the learning rate, tree complexity, and number of trees. We determine the optimal number of trees through cross-validation [^1], keeping the first parameter as default and aiming for simplicity with only a few splits, typically resulting in three or four regions. 
 
-[^1]: No boosting cross-validation code reported, as requires little changes from loop in @sec-rf in the fitting function (gbm) and hyperparameter sequence from 50 to 2000. See GitHub for details.
+[^1]: No boosting cross-validation code reported, as requires little changes from loop in @sec-rf in the fitting function (gbm) and hyperparameter sequence from 50 to 2000. See [GitHub](https://github.com/jacopomanenti01/Statistical-Learnin/blob/main/Homeworks/Homework%202/Homework%202.qmd) for details.
 ```{r}
 #| include: false
 #| label: cv_bg
