@@ -1,5 +1,6 @@
 ---
 title: "Statistical Learning, Homework #1"
+date: 2024-03-27
 author: "Jacopo Manenti, id: 247279"
 format: 
       pdf: 
@@ -9,7 +10,7 @@ editor: visual
 
 ```{r setup, include = FALSE}
 # Package names
-packages <- c("tidyverse", "dplyr","gridExtra", "caret","class","ROCR" )
+packages <- c("tidyverse", "dplyr","gridExtra", "caret","class","ROCR","purrr", "ggpubr","kableExtra")
 
 # Install packages not yet installed
 installed_packages <- packages %in% rownames(installed.packages())
@@ -26,236 +27,201 @@ knitr::opts_chunk$set(warning=FALSE,
 
 ```
 
-# Abstract
+# Introduction and Data Exploration
 
-# Introduction
+In this paper, we explore factors influencing pregnant women's decisions regarding breastfeeding their babies. Data from a study at a UK hospital involving 139 participants are stored in "bf.csv". We will conduct logistic regression and k-nearest neighbors analysis to understand factors affecting the decision of pregnant women to breastfeed their babies. This analysis might be useful in targeting breastfeeding promotions effectively.
 
-The dataset *bf.csv* has been originated from a research project conducted at a UK hospital, focusing on factors influencing pregnant women's decisions regarding breastfeeding.
-
-```{r, echo = false}
-df <- read.csv("bf.csv") # import data
-dim(df) # show the dimensions of the dataset (n.rows, n.columns) 
+```{r import_data}
+df <- read.csv("bf.csv") # import data 
+dim(df) # get dimension
 ```
 
-With insights drawn from 135 expectant mothers, the study aims to guide targeted breastfeeding promotion efforts towards individuals less inclined to choose breastfeeding.
+In Table 1 it has been reported a glimpse of the data set and in Table 2 the variables' data structure. The **breast** variable is the response variable, categorizing feeding practices into breastfeeding (Breast) and exclusive bottle feeding (Bottle). Since logistic regression model requires a Bernoulli variable, we will encode it into binary values (1 and 0, respectively). Furthermore, most variables are categorical, so to facilitate the modeling process, we will organize them into factors. Additionally, we look at missing values reported in Table 3, which mostly concern age and education level, notably among bottle-feeding and white mothers, indicating possible data collection issues. Thus, we remove these records, mindful of potential impacts on class balance. Finally, Table 4 displays the recoded and cleaned version of the data set, with fewer rows resulting from the removal of NA values (135). Following this data preparation step, we will perform basic statistical analyses and generate relevant plots.
 
-The factors explored are ten, namely :
+```{r Table_1&Table_2, echo = FALSE}
 
-```{r, echo = false}
-names(df)
+# function for plotting data set head
+table_plot <- function(table, cap , lab, ...) {
+  table %>% 
+  knitr::kable( caption = cap, format="latex", booktabs = TRUE, align ="c", label = lab)%>%   kableExtra::kable_styling(full_width = FALSE,position = "center", latex_options = c("scale_down","HOLD_position"))
+}
+
+# function for creating a table with data types
+datatypes_table <- function(data) {
+  types <- sapply(data, class)
+  types_matrix <- matrix(types, nrow = 1)
+  types_df <- as.data.frame(types_matrix, stringsAsFactors = FALSE)
+  colnames(types_df) <- names(data)
+  return(types_df)
+}
+
+glimpse<- head(df,6) # get the first 6 rows of the data set
+
+
+# Plot table 1
+table_plot(glimpse, cap = "shows the first 6 rows in the data set.", lab = "Table 1") 
+
+# plot table 2
+table_plot(datatypes_table(df), cap ="shows the data type of each variable of the data set.", lab ="Table 2") 
+
 ```
 
-all categorized into binary levels for analysis and interpretation.
-
-We start looking at the first 7 rows of the dataset, to preminarly explore the data. From this, it is clear the strucutre of data and the presence of missing values **na**. With the help of the function **glimpse** it returns a usefull insight of the dataset structure, expecially regarding to its dimension, which is 139 observations and 10 variables.
-
-```{r}
-head(df, 6)
-glimpse(df)
-```
-
-Withing the variables, **breast** is the response variabile, which represents the class were UK's pregnat women of the study conducted were classified into. The outcome of the study could aid in targeting breastfeeding promotions towards women with a lower probability of choosing. Moreover, despite the categorical nature of the response variable "breast," which delineates various feeding practices for infants including breastfeeding and exclusive bottle feeding, it is imperative to encode it as binary values (0 and 1) to accommodate logistic regression analysis. This coding transforms "breast" into a Bernoulli variable, enabling each category to be represented by a singular binary outcome. Such encoding facilitates logistic regression to model the likelihood of belonging to one feeding category relative to the other.
-
-Before recoding, it is worth noting that the majority of predictors are categorical variables, with only **age** and **educat** being numerical. Since the variable is categorical, we can organize everything into factors with levels for classification purposes.
-
-Furthermore, missing data have been observed, primarily regarding the age of mothers and their educational attainment, particularly among those engaged in breastfeeding or bottle-feeding. The majority of missing values are noted among women of white ethnicity, suggesting potential data collection issues. With this assumption allows us to discrad records containing missing values (nota su unbalanced class potrebbe impattre)
-
-```{r}
+```{r Table_3, echo = FALSE }
 df %>% 
-  filter(!complete.cases(.)) %>% 
-  print()# see na records
+  filter(!complete.cases(.)) %>% # get the rows containing NA's values
+  table_plot(., cap = "shows the rows containing NA values.", lab = "Table 3") # plot table 3
 
 ```
 
-At this stage, we proceed to preprocess the dataset, converting categorical variables into factors and adjusting the response variable accordingly. Following this data preparation step, we will perform basic statistical analyses and generate relevant plots. It is essential to ensure data cleanliness before proceeding with further statistical analysis.
-
-```{r}
+```{r Table_4, echo = FALSE}
 df <- df %>% 
-    select(names(df)) %>%
-  na.omit() %>% 
+    select(names(df)) %>% # select variables' names
+  na.omit() %>% # remove rows containing NAs values
   mutate(breast = recode(breast, 
                          Breast = "1",
-                         Bottle = "0")) %>% 
-  mutate_if(is.character,as.factor)
-
-head(df)
-
-glimpse(df)
-attach(df)
-```
-
-# Statistical Summary
-
-Looking at the statistical summary of the features can be useful in inspecting the feature distribution and anomalies, if any.
-
-```{r}
-summary(df)
-```
-
-The dataset analysis reveals several key observations:
-
-1.  **Response Variable Imbalance**: The response variable, indicating breastfeeding practices, shows a significant imbalance, with 99 out of 135 instances reporting breastfeeding.
-
-2.  **Demographic Insights**: Among the 135 participants, only 21 are single, and merely 32 are current smokers. The dataset comprises patients aged between 17 and 40 years, with an average age of 18 years for discontinuing studies.
-
-3.  **Limited Influence of Race**: Race does not appear to exert a substantial influence on the observed variables.
-
-In the following table it is reported the proportion for the imblacence classes
-
-```{r}
-prop.table(table(breast))
-prop.table(table(smokenow))
-prop.table(table(partner))
-```
-
-# Analisi delle numeric variables
-
-## Distribuzione delle numeric variables
-
-First, we’ll plot the histograms of numeric variables.
-
-```{r}
-hist(age)
-hist(educat)
-```
-
-## Looking at the relationship between numerical and target features
-
-Looking at the numerical features, we explore the relationship between demographic factors and breastfeeding practices among 135 respondents. Figure X provides a visual representation of this investigation, showcasing scatterplots illustrating the age of women (*age*) and the age at which they concluded full-time education (*educat*). Participants who breastfed their babies are distinguished in blue, while those who did not are represented in orange. Notably, a pattern emerges suggesting that individuals who breastfed tended to exhibit a higher educational attainment compared to their counterparts.
-
-Moreover, in Figure X, we present two pairs of boxplots. The first pair illustrates the distribution of age stratified by the binary breast variable, while the second pair demonstrates a similar breakdown for educat. These graphical representations underscore the notable relationship between the predictor variable *educat* and the response variable, emphasizing the significance of educational attainment in influencing breastfeeding practices.
-
-```{r}
-# FIGURE 4.1.
-df %>% 
-  ggplot(aes(x= age,
-             y= educat,
-             colour= breast))+
-  geom_point()+
-  labs(title="scatterplo age vs educat")+
-  theme_minimal()
-
-```
-
-In the scatterplot panel of Figure X, we have depicted the age of women and the age at which they left full-time education (educat) for all 135 respondents. Those who breastfed their baby are indicated in blue, while those who did not are in orange. It appears that individuals who breastfed tended to have a higher educational level than those who did not.
-
-In the above figure (X), two pairs of boxplots are shown. The first shows the distribution of *age* split by the binary *breast* variable; the second is a similar plot for *educat*. It is worth noting that Figure 4.1 displays a pronounced relation- ship between the predictor *educat* and the response.
-
-```{r}
-boxplot(age ~ breast, data = df, col = c("lightblue", "darkorange"), xlab = "breast",
-ylab = "age")
-```
-
-The boxplot tells us that mothers who breast tend to have slightlyhigher age than the one who dont.
-
-```{r}
-boxplot(educat ~ breast, data = df, col = c("lightblue", "darkorange"), xlab = "breast",
-ylab = "educat")
-```
-
-```{r}
-# distribution in respect of breast
-df %>% 
-  ggplot(aes(age, fill= breast))+
-  geom_density(alpha = 0.2)+
-  theme_bw()
-# distribution in respect of breast
-df %>% 
-  ggplot(aes(educat, fill= breast))+
-  geom_density(alpha = 0.2)+
-  theme_bw()
-```
-
-# Looking at distributions of categorical features
-
-Bar plots can be used to view the distribution of categorical variables. This step may be omitted, since we already have an idea of relative frequencies of categorical variables.
-
-Calcola la distribuzione delle categorie nella variabile di risposta.
-
-Verifica la presenza di sbilanciamento di classe, se presente.
-
-Crea grafici (ad esempio, grafici a barre) per visualizzare la distribuzione della variabile di risposta rispetto alle altre variabili.
-
-con le numeriche ok
-
-## 13. Looking at the relationship between categorical and target features
-
-Box plot is one of the best ways to visualize the relationship between a numeric and categorical feature.
-
-```{r}
-df %>% 
-  ggplot( aes(smokenow, fill = breast)) +
-  geom_bar(position = "dodge", stat = "count") +
-  labs(x = "Variabile Predittiva", y = "Frequenza", fill = "Variabile Risposta") +
-  ggtitle("Grafico a Barre delle Frequenze")
+                         Bottle = "0")) %>% # recode the response variable into binary
+  mutate_if(is.character,as.factor) # mutate the structure from character to factors
   
+#plot table 4
+head(df,4) %>% 
+  table_plot(. , cap = "shows the cleaned version of the dataset with 135 rows (observations)", lab = "Table 4")
+
+
+attach(df) # attach the data set
+```
+
+In Table 5 it has been reported the statistical summary of the dataset. It can be clearly seen that the *response variable* has a significant imbalance between classes, with 99 out of 135 instances reporting breastfeeding (gaphical representation at Figure 1). Also, among the 135 participants, only 21 are single, and a mere 32 are current smokers. The data set comprises patients aged between 17 and 40 years, having studed up to the age of 18 on average. Interviews were conducted balancedly across both races.
+
+```{r Table_5, echo = FALSE}
+#| label: tbl-summary-stat
+#| tbl-cap: "summary statistics of response variable and demographic factors"
+#| tbl-subcap: ["breast", "partner", "age", "smokenow", "educat"]
+#| layout-ncol: 5
+
+sum_df <- summary(df) # get summary of data set
+
+# plot just relevant observations
+kable(summary(df["breast"]))
+kable(summary(df["partner"]))
+kable(summary(df["age"]))
+kable(summary(df["smokenow"]))
+kable(summary(df["educat"]))
+
+
+
+ 
+```
+
+```{r imbalance_table, fig.width=5, fig.height=2, fig.cap="Illustrates breastfeeding (blue) vs. bottle-feeding (red) proportions.", fig.align="center", out.width="50%" ,echo = FALSE}
+
+# compute the proportions for 'breast', 'smokenow' and 'partner' variables
+prop_breast<- round(prop.table(table(breast)) *100,2)
+
+# converting prop_breast into a dataframe
+prop_breast_d <- as.data.frame(prop_breast)
+
+# barplots from the dataframe 
+prop_breast_d %>% 
+    ggplot(aes(x = breast, y = Freq, fill=breast))+
+    geom_bar(stat = "identity", position = "dodge", width = 0.7) +
+    scale_fill_manual(values = c("red", "blue")) +
+    labs(x = "breastfeeding methods", 
+         y = "Proportion by class", 
+         title = "Class Distribution of the Response Variable") + 
+    theme(plot.title = element_text(hjust = 0.5)) +
+    guides(fill = guide_legend(title = "Breastfeeding Methods"))
 
 ```
 
-#Looking at pairwise joint distribution of numeric data
+We proceedexploring the relationship between numerical features (**age** and **educat**) and breastfeeding practices. Figure 2 (A) shows scatterplot, where breastfeeding individuals are in blue, non-breastfeeding in orange. Notably, a pattern emerges suggesting that the first groups tended to have a higher educational attainment compared to the other. This is reinforced by the boxplots, B for age and C for education, as *C* reports a revelant difference between the two conditionated classes (Bottle-feeding distribution is concentrated at lower education levels).
 
-The last output for numeric data EDA is a pairwise joint distribution plot.
+```{r numerical, fig.width=10, fig.height=4, fig.cap="*Top*: Scatterplot (A) of mothers' age and education, red for breastfeeding, blue for non. *Center*: Boxplots of age (B) and education (C) by response status.", fig.align="center", echo = FALSE,  out.width="80%" }
 
-To generate further insights, we ran the function numeric_eda and added a parameter hue=‘DayOfWeek’. This allows us to color our pairwise plot by each day of the week.
+# assign the scatterplot to a variable
+numeric_scatter <-  df %>% 
+      ggplot(aes(x= age,
+                 y= educat,
+                 colour= breast))+
+      geom_point()+
+      labs(title="scatterplo age vs educat")+
+      theme_minimal()+
+      theme(plot.title = element_text(hjust = 0.5))
 
-```{r}
-pairs(df)
+
+# assign the box plots to variables
+age_box <- df %>% 
+              ggplot(aes(x= breast, y=age, fill=breast))+
+              geom_boxplot()+
+              theme_classic()
+
+educat_box <- df %>% 
+              ggplot(aes(x= breast, y=educat, fill=breast))+
+              geom_boxplot()+
+              theme_classic()
+
+# plot scatterplot and boxplots into a single frame
+ggarrange(numeric_scatter,
+          ggarrange(age_box,educat_box, ncol=2, labels= c("B","C")), 
+          labels = "A",
+          heights = c(4,4),
+          nrow = 2)
+
 ```
 
-Let's quantify by computing pairwise correlations. Of course if we try that we get an error: there is a qualitative, non-numeric column (Direction) in the dataframe. Remove it and recompute the correlations:
+```{r correlation_matr, echo = FALSE}
+#| label: tbl-corr-matrx
+#| tbl-cap: "Shows correlation matrix between age and educational attainment, revealing no relevant association."
 
-```{r}
-df %>% 
-  select(!is.factor) %>% 
-    cor()
+# compute and plot the correlation matrix
+df %>%    
+  select(!is.factor) %>%      
+  cor() %>% 
+  kable(.)
 ```
 
-and for categorical data
+For categorical features, bar plots aid in similar analysis: consistent disparities in bar heights may suggest an association between predictor and response. In Figure 3, this behavior is seen in **howfdfr**, **smokenow**, **smokebf**, and **ethnic**. We confirm this with a chi-square test; Table 7 shows significance only for these predictors, indicating correlation with baby-feeding methodology.
 
-To analyzed the correlation between categorical variable we can proceed with chisq test
+```{r categorical, fig.width=10, fig.height=4, fig.cap="Bar plots for predictors and response (pink: breastfeeding, red: bottle-feeding).", fig.align="center", echo = FALSE, out.width="80%"}
 
-#2,2
-
-```{r}
-# select categorical variables
+# get only categorical variables but breast
 plot_names <- df %>%
   select_if(is.factor) %>%
-   select(-breast)
+  select(-breast)
 
-# create a grid
-# Inizializza una lista per memorizzare i grafici
+# initialize a list where we will save graphs
 plots_list <- list()
 
-
-# plot categorical variables
-grid.arrange(
+# compute and append each  bar plot to the list 
 for (i in names(plot_names)){
-  tbl <- table(plot_names[[i]],breast)
-  br <- barplot(tbl, xlab = "Breadfist method", ylab = paste(i, "counts"), main="test", beside = TRUE, col = c("red","pink"))
-  plots_list <- br
+  tbl <- table(df[[i]], breast)
+  fly <- as.data.frame(tbl)
+  colnames(fly) <- c("Method", "breast", "Frequency")
+  
+  br <- fly %>% 
+    ggplot(aes(x = Method, y = Frequency, fill = breast))+
+    geom_bar(stat = "identity", position = "dodge", width = 0.7) +
+    labs(x = i, y = paste(i, "counts"), title = paste(i, "and breast")) +
+    scale_fill_manual(values = c("red", "pink")) +
+    theme_minimal()+
+    theme(plot.title = element_text(hjust = 0.5))
+  
+  plots_list[[i]] <- br
+  
+}
 
-} ,
-nrow = 3,
-  top = "Title of the page")
-
+# plot bar plots in the same plot grid
+ggarrange(plotlist = plots_list, ncol = 4, nrow = 2)
 
 ```
 
-A bar plot can suggest a potential correlation between two categorical variables if it exhibits significant differences in bar heights across variable categories. Consistent disparities in bar heights between variable categories may indicate an association between them. Additionally, the presence of a clear trend or pattern in bar heights could imply a correlation between the variables. However, it is crucial to note that the bar plot alone does not offer definitive evidence of correlation, and further statistical analysis may be required to confirm such an association.
+```{r chi_square, echo =FALSE}
+#| label: tbl-chisq
+#| tbl-cap: "shows results of chisq-test between pairs of each categorical and breast variable"
 
-For this reason we proceede comparing correlation between the response variable and the categorical predictors throguh the chi-sqaure test.
-
-The chi-square test assesses the association between categorical variables by comparing observed and expected frequencies. The hypotheses include the null hypothesis of independence and the alternative hypothesis of association. The null hypothesis is rejected if the p-value is below the chosen significance level, indicating a significant association between the variables.
-
-```{r}
-
-# Inizializza un dataframe vuoto per memorizzare i risultati
-
+# initialize empty vectors where we will save results
 all_var <- all_chi_s <- all_p_val <- c()
 
-# # Ciclo per calcolare il chi-quadro e memorizzare i risultati nel dataframe
-
-
+# loop for computing the chi-square results and append theme to the initialized vectors
 for (i in names(plot_names)){
     tbl <- table(plot_names[[i]],breast)
     chi_sq<- chisq.test(tbl)
@@ -266,258 +232,193 @@ for (i in names(plot_names)){
     all_p_val <-append(all_p_val,round(chi_sq$p.value, 6))
 }
 
+# convert to a data frame
 test_df <- data.frame(
   Variable = all_var,
   Chi_squared = all_chi_s,
   P_value = all_p_val
 )
 
+#plot the data frame
+kable(test_df)
 
 ```
 
-The chi-square test results indicate statistically significant associations between breastfeeding method and variables such as method of feeding (p = 0.0057), smoking status (p \< 0.001), and ethnicity (p = 0.000016). Conversely, no significant association is found with pregnancy (p = 0.968) and partner status (p = 0.119). These findings emphasize the diverse influences shaping breastfeeding practices, with implications for understanding and promoting optimal infant feeding behaviors across different demographic groups.
+# Splitting the data set into training and testing sets
 
-## Question 2
+Before proceeding with the classification task, we split the dataset into training (df_train; 100 samples) and testing sets (df_test; 35 samples), maintaining the observed class imbalance.
 
-Given the class imbalance observed in the investigation conducted within the UK hospital setting regarding factors influencing pregnant women's decisions on breastfeeding their infants, we split the data into training and test sets while preserving this characteristic, with proportions of 26.67% for bottle feeding and 73.33% for breastfeeding.
-
-```{r}
-# class imbalance
-prop.table(table(breast))
-```
-
-# install.packages("caret")
-
-```{r}
-# Set the seed for reproducible results
-set.seed(5)
-
-# Obtain indices for creating a data partition with the desired proportion of observations belonging to the 'breast' class
-props <- prop.table(table(breast)) # retrieving the proportion
-train_indices <- caret::createDataPartition(breast, p=props[["1"]], list = FALSE)  
-
-#create training set
+```{r split_data}
+set.seed(5) # Set the seed for reproducible results
+# get proportion of class
+prop_breast<- round(prop.table(table(breast)) *100,2)
+# Obtain indices
+train_indices <- createDataPartition(breast,p=prop_breast[["1"]]/100, list = FALSE)  
+#create a train set and a vector of its labels
 df_train <- df[train_indices,]
-y_tr <- breast[train_indices]
-
-# check for training set's class unbalance
-prop.table(table(y_tr)) == round(props,2)
-
-#create test set
-
+y_tr <-  breast[train_indices]
+#create a test set and a vector of its labels
 df_test  <- df[-train_indices, ]
 y_ts <- breast[-train_indices]
+```
 
+```{r check_prop, include=FALSE}
+#check for training set's class unbalance
+prop.table(table(y_tr)) == round(prop_breast/100,2)
 # check for test set's class unbalance
-prop.table(table(y_ts)) == round(props,2) # close, probably due to small sample
-
+prop.table(table(y_ts)) == round(prop_breast/100,2) # close, probably due to small sample
 ```
 
-## Fit the following GLM model:
+# Fit a Logistic Regression model and a k-NN
 
-In our case study, the responses were classified into two categories based on the variable "breast" in the dataset, "breastfeeding", coded as 1,and "bottle" coded as 0.
+We can now start modelling a logistic regression (using the training set) for the purpose of estimating the probability of a mother breastfeeding her baby (coded as 1) given specific factor configurations, denoted as $P(breast = 1 | factors)$. We estimate the values of the coefficients by the following approach: $$\begin{aligned}
+\text{logit}(E(\text{breast})) = \beta_0 + \beta_1 \text{pregnancy} + \beta_2 \text{howfed} + \beta_3 \text{howfedfr} + \beta_4 \text{partner} \\  + \beta_5 \text{age} + \beta_6 \text{educat} + \beta_7 \text{ethnic} \quad + \beta_8 \text{smokenow} + \beta_9 \text{smokebf}\end{aligned}$$ Table 8 presents the estimated coefficients and associated information of the fitted model. We conclude that, apart from **howfedfr**, **smokenow** and **ethnic**, there is no significant association between the predictors and the probability. The value of each coefficients means a variation in the probability of breastfeeding. For example, the coefficient of **smokenow** is negative, indicating that mothers that smoke are less likely breastfeed than non-smokers. To be more specific, holding other variables constant, smoking is associated with a decrease in the log odds of breastfeeding by 3.51100 units, and subsequently with a decrease in probability.
 
-Instead of directly modeling these response categories, we use a logistic regression that aims to model the probability that an observation belongs to a particular category. For example, we can model the probability of a certain breastfeeding behavior given specific factors $Pr(breast = 1 | factors)$. Subsequently, for any individual for whom \$p(\\text{breast} = 1) \> 0.5\$, predictions can be made indicating a higher likelihood of engaging in breastfeeding behaviors. In the upcoming section, we'll analyze how performance varies with different threshold values (T) for (p(\text{breast} = 1) \> T ).
-
-Understanding these probabilities can be instrumental in our case study. For instance, it can help target breastfeeding promotion efforts more effectively by identifying women with a higher probability of engaging in breastfeeding or related behaviors. This introduction sets the stage for fitting a generalized linear model (GLM) to the data, allowing us to explore the relationships between various factors and breastfeeding behaviors further. We will employ the following model:
-
-$$\text{logit}(E(\text{breast})) = \beta_0 + \beta_1 \text{pregnancy} + \beta_2 \text{howfed} + \beta_3
-\text{howfedfr} + \beta_4 \text{partner} + \beta_5 \text{age} + \beta_6 \text{educat} + \beta_7 \text{ethnic} + \beta_8 \text{smokenow} + \beta_9 \text{smokebf}$$
-
-This model will help us analyze and quantify the influence of various factors on breastfeeding behaviors.
-
-```{r}
-mod1 <- glm(breast~., data = df_train, family=binomial)
-summary(mod1)
-
+```{r glm_fit}
+mod1 <- glm(breast~., data = df_train, family=binomial) # fit the model
+mod1_sum <- summary(mod1) # retrieve associated information
 ```
 
-Table \[inserire numero\] presents the estimated coefficients and associated information derived from fitting a logistic regression model with multiple predictors to the *breast* training set. The model aims to predict the probability of *breast* being equal to 1.
+```{r glm_summary,echo =FALSE}
+#| label: tbl-glm_summary
+#| tbl-cap: "shows fitted logistic regression coefficients for predicting breastfeeding likelihood."
 
-Given the reported p-values associated with each $\beta_i$, most of them do not fall below the standard confidence level of 0.05. Consequently, we conclude that, apart from current smoking status and ethnicity, there is no significant association between the predictors and the likelihood of breastfeeding.
+#plot fitted coefficients
+kable(mod1_sum$coefficients)
+```
 
-Furthermore, we observe that $\beta_3 = 1.648941$ (coefficient assosiated with *howfedfrBreast*), $\beta_8 = -3.211827$ (coefficient assosiated with *smokenow*) and $\beta_7 = -1.661770$ (coefficient assosiated with *ethnic*) respectively. This suggests that, while holding other predictors constant, current maternal smoking is linked to a reduction in the probability of breastfeeding. Similarly, being of White ethnicity is associated with a decrease in the likelihood of breastfeeding. Conversely, if the mother's friends breastfeed their children, it is linked to an increase in the probability of breastfeeding. To be more specific, holding other variables constant, smoking is associated with a decrease in the log odds of breastfeeding by 3.51100 units, being White is associated with a decrease in the log odds of breastfeeding by 18.88204 units, whereas having friends breastfeed their children makes log odds of breastfeeding increase by 1.648941 units.
+After fitting the logistic regression, we proceed to the k-nearest neighbors (k-NN) classifier. To determine the optimal value for $k$, we compare values from 1 to 100 to find the one with the lowest error rate, indicating the fraction of misclassified test observations. Choosing the value of $k$ that minimizes this error helps obtain a more accurate model that generalizes more effectively. From Figure 4, the optimal value is $k = 9$.
 
-## k-nn classifier
-
-In our case study, alongside the logistic regression model, we may explore using the k-nearest neighbors (k-NN) classifier to predict breastfeeding behaviors. This non-parametric method predicts the class for each test observation based on its proximity to other observations in the training dataset.
-
-The k-NN classifier requires selecting a positive integer value \$ k \$. It identifies the \$ k \$ nearest points in the training dataset to the test observation \$x_0 \$, forming the set \$ N_0 \$. Then, it estimates the conditional probability for each class \$j \$ using the formula:
-
-$$
-\text{Pr}(Y=j|X=x_0)=\frac{1}{k}\sum_{i\in N_0} I(y_i=j)
-$$
-
-Finally, it classifies the test observation $x_0$ by assigning it to the class with the highest estimated probability. For instance, if we consider a pregnant woman with specific traits and utilize the k-NN classifier with \$ k = 5 \$, we identify the 5 most similar cases in our training dataset. Then, we compute the percentage of neighbors belonging to a certain class and assign the observation to the class with the highest probability among the neighbors.
-
-To determine the optimal value of \$ k \$, we compare a range of values (from 1 to 100) to find the one with the lowest error rate. The error rate indicates the fraction of test observations misclassified, guiding us to select the \$ k \$ value that minimizes this error for a more accurate and generalizable model.
-
-```{r}
-# library
-library(class)
-
+```{r k_nn, echo = FALSE}
 # create train and test set for K-NN
-
 x_train <- df_train %>% 
     select(-breast) %>% 
-    mutate_if(is.factor,as.numeric) %>%  # mutate factors into numeri, avoiding coercion warning message with knn()
+    mutate_if(is.factor,as.numeric) %>%  # mutate factors into numeric, avoiding coercion warning message with knn()
     mutate(across(where(is.numeric), ~case_when(. == 1 ~ 0, . == 2 ~ 1, TRUE ~ .))) #recoding 
-
 x_test <- df_test %>% 
     select(-breast) %>% 
-    mutate_if(is.factor,as.numeric) %>%  # mutate factors into numeri, avoiding coercion warning message with knn()
+    mutate_if(is.factor,as.numeric) %>%  # mutate factors into numeric, avoiding coercion warning message with knn()
     mutate(across(where(is.numeric), ~case_when(. == 1 ~ 0, . == 2 ~ 1, TRUE ~ .))) # recoding
 
-# define a function to compute the rate
+# define a function to compute the error rate
 calc_error_rate <- function(predicted.value, true.value) {
 mean(true.value != predicted.value)
 }
 
 # initialize the error rate vector
 errors_ts <- c()
-
 # initialize the k values vector
 kvec <- c(seq(1:100))
-
-# loop for computing different value of error rate in respect to chaning k'values
-
+# loop for computing different value of error rate in respect to changing k's values
 for (k in kvec) {
   pred_ts <- knn(x_train, x_test, y_tr, k = k)
   err_ts <- calc_error_rate(pred_ts, y_ts)
   errors_ts <- append(errors_ts, err_ts)
 }
-
-plot(x= 1/kvec, y=errors_ts, type = "b", xlim = c(0.01, 1), ylim = c(0, 0.6), log = "x", xlab = "1/K",
-ylab = "Error Rate")
-
 # select the k value that minimizes the error rate
 k_star <- kvec[which.min(errors_ts)]
 ```
 
-# Evaluate the performance of the two methods.
+```{r _optimal_k, fig.cap="The KNN test error rate as the number of neighbors K decreases.", fig.align="center", echo = FALSE, fig.width=7, fig.height=4}
 
-First of all, we take prediction on the logistic model once we have fitted the model. With the k-nn we will be using k =9 for evaluating purposes. After the predictions on the test datasets are made, we use thershold value = 0.5and then test other values
+#plot error rate wrt decreasing values of k
+plot(x= 1/kvec, y=errors_ts, 
+     type = "b", 
+     xlim = c(0.01, 1), 
+     ylim = c(0, 0.6), 
+     log = "x", 
+     xlab = "1/K",
+     ylab = "Error Rate")
+points(x = 1/k_star, y = errors_ts[k_star], col = "green", pch = 19)
+text(x = 1/k_star, y = errors_ts[k_star], labels = paste("K = 9 and Error rate:", round(errors_ts[k_star], 2)), pos = 1)
+```
 
-```{r}
-# take predictio knn with k = 9
+# Predictions with the two models
+
+We are now ready to take predictions on test set using both models. For the *k-NN*: given an observation, we will assign the majority class among k=9 neighbors. For *logistic regression*: given an observation, we will compute probabilities using the estimated coefficients and compare them with the threshold value of 0.5. If the estimated probability exceeds 0.5, the mother's breastfeeding behavior will be predicted as 1 (breastfeeding); otherwise, it will be classified as 0 (bottle).
+
+```{r prediction}
+#vector of predictions with k-nn where k = 9
 knn_pred <- knn(x_train, x_test, y_tr, k = 9)
-
-## take prediction with fitted logistic regression
+#vector of predictions with fitted logistic regression
 mod1_predict <- predict(mod1, df_test, type= "response")
-
-# We want actual labels instead of probabilities (and we are using our standard 0.5 threshold):
-
+#classify using our 0.5 threshold:
 glm_pred <- rep(0, nrow(df_test))
 glm_pred[mod1_predict > 0.5] <- 1
 ```
 
-Then, we use confusion matrix asa performance metric technique for summarizing the performance of the two classification algorithms. It is a matrix that gives you insight not only into the errors being made by your classifier but more importantly the types of errors that are being made. It reports The number of correct and incorrect predictions are summarized with count values and listed down by each class of predicted and actual value.
+Next, to assess performance evaluation, we utilize the confusion matrix and common evaluation metrics including **Accuracy** (proportion of correctly classified cases among all cases), **sensitivity** (proportion of true positives among all actual positive cases), **specificity** (proportion of true negatives among all actual negative cases) and **false positive rate** (proportion of negative cases mistakenly classified as positive among all actual negative cases).
 
--   TN: Instances where the mother does not breastfeed, and we correctly predict that she uses bottle feeding.
--   TP (True Positive): Cases where the mother breastfeeds, and we correctly predict that she breastfeeds.
--   FP (False Positive): Instances where we predict the mother breastfeeds, but she actually uses bottle feeding.
--   FN (False Negative): Instances where we predict the mother uses the bottle feeding, but she actually breastfeeds.
+# Performance evaluation, conclusion and limitation
 
-```{r}
+Looking at Table 9 (a) and (b), both algorithms show similar numbers of correctly classified cases (sum of elements in the main diag), implying similar accuracy levels. However, Table 9 (c) reveals some differences: **k-NN model** achieves perfect sensitivity (1), indicating precise identification of all positive cases. However, its specificity is notably low at 0.22 (high false positive rate). This suggests difficulties in accurately classifying negative cases, as it tends to classify most instances into the majority class (positive). Conversely, despite having lower sensitivity (0.84), **Logistic regression model** outperforms k-NN in specificity with a score of 0.88, resulting in a markedly lower false positive rate (0.11) and demonstrating a superior classification ability.
+
+```{r performance_evaluation, echo = FALSE}
+#| label: tbl-mtcars
+#| tbl-cap: "Performance evaluation"
+#| tbl-subcap: ["k-NN (k=9) predictions compared to true breastfeeding behavior for 35 test set observations.", "Confusion matrix for logistic regression (threshold = 0.5) compared to true breastfeeding behavior for 35 test set observations.","Accurancy, sensitivity, specificity, false positive rate for both models"]
+#| layout-ncol: 3
+
 # confusion matrix for knn where k = 9
-table(knn_pred, y_ts)
-
-# confusion matrix for logist regression and T = 0.5 
-table(glm_pred, y_ts)
-```
-
-Both confusion matrix states that the true positves and true negatives are 28 and 30 respectively. But in each we have different values of sensitivity, sensitivity, specificity and precision. Whereas, the level of accurancy it similar
-
-It's evident that both models perform differently in their predictions. The logistic regression model has a higher number of true negatives and true positives, indicating better performance in correctly identifying both negative and positive cases. In addition, the higher number of false positives observed in the k-NN model suggests that it may struggle with classifying negative cases accurately, as it tends to misclassify them as positive. This phenomenon could be attributed to class imbalance.
-
-Persuing further analysis in classification model assessment, key metrics evaluate its ability to distinguish classes effectively. Three common metrics are sensitivity (or recall or true positive rate), specificity (or true negative rate), and false positive rate.
-
--   *Accuracy*: Measures the proportion of correctly classified cases (both true positives and true negatives) among all cases. $\frac{TN + TF}{TN + TF + FP + FN}$
--   *sensitivity*= Measures the proportion of true positives among all actual positive cases. $\frac{TP}{ (TP + FN)}$
--   *specificity* (or *true negative rate*) = Measures the proportion of true negatives among all actual negative cases. $\frac{TN}{ (TN + FP)}$
--   *false positive rate* = Indicates the proportion of negative cases mistakenly classified as positive among all actual negative cases. $\frac{FP}{(FP + TN)} = 1 - specificity$
-
-```{r}
+knn_conf<- table(knn_pred, y_ts)
+row.names(knn_conf) <- c("pred 0","pred 1")
+colnames(knn_conf) <- c("true 0","true 1")
 # K-nn k=7 accurancy
 k_acc<- mean(knn_pred == y_ts)
-# Logistic regression with T=0.5 accurancy
-glm_acc <- mean(glm_pred == y_ts)
 # K-nn k=7 sensitivity
-
 k_sens <- sum(knn_pred ==1  & y_ts == 1) / sum(y_ts == 1)
-
 # K-nn k=7 specificity
 k_spec <- sum(knn_pred ==0  & y_ts == 0) / sum(y_ts == 0)
-
 # K-nn k=7 false positive rate
 k_fpr <- 1- k_spec
 
+# confusion matrix for logist regression and T = 0.5 
+log_conf <- table(glm_pred, y_ts)
+row.names(log_conf) <- c("pred 0","pred 1")
+colnames(log_conf) <- c("true 0","true 1")
+# Logistic regression with T=0.5 accurancy
+log_acc <- mean(glm_pred == y_ts)
 # Logistic regression with T=0.5 sensitivity
 log_sens <- sum(glm_pred ==1  & y_ts == 1) / sum(y_ts == 1)
 # Logistic regression with T=0.5 specificity
 log_spec <- sum(glm_pred ==0  & y_ts == 0) / sum(y_ts == 0)
-
 # Logistic regression with T=0.5 precision
 log_fpr <- 1- log_spec
 
+# create row vectors
+acc <- c(k_acc, log_acc)
+sens <- c(k_sens, log_sens)
+spec <- c(k_spec,log_spec)
+fpr <- c(k_fpr,log_fpr)
+# create a dataframe
+df2<- rbind(acc,sens,spec,fpr)
+#rename columns
+colnames(df2) <- c("k-nn","log.model")
+# convert to a table
+summary_tbl <- as.table(df2)
+
+#plot the tables
+kable(knn_conf)
+kable(log_conf)
+kable(summary_tbl)
 ```
 
-In conclusion, logistic regression exhibits slightly higher accuracy compared to the k-nearest neighbors (k-NN) model, with scores of 0.8571429 and 0.8, respectively. However, a closer analysis reveals that the k-NN model has perfect sensitivity (1), indicating its ability to correctly identify all positive cases. Despite this, when considering specificity, k-NN has a score of 0.22, indicating a high false positive rate (0.77).
+This observation is crucial for our study's objective of optimizing the targeting of breastfeeding promotions toward less inclined women. For instance, let's consider estimating the probability of a white, non-single, smoker mother (but not before), beginning her pregnancy, with friends who do not breastfeed, aged 24, and who discontinued schooling at 18, opting to breastfeed her baby despite not having been breastfed herself. We can make the predictions by using estimates for the regression coefficients from Table 8 as follows:
 
-In contrast, although logistic regression has lower sensitivity (0.84), it outperforms k-NN in terms of specificity with a score of 0.88, resulting in a significantly lower false positive rate (0.11).
-
-In summary, the k-NN model demonstrates perfect sensitivity, which may be crucial in contexts prioritizing accurate identification of positive cases. However, logistic regression offers higher specificity and a lower false positive rate, suggesting better classification ability for negative cases.
-
-In light of the dataset's imbalance, logistic regression emerges as the superior performer compared to K-nearest neighbors (KNN), particularly due to its adeptness in classifying negative cases, which are significantly fewer. This observation holds particular significance within the context of our study's objective, aimed at optimizing the targeting of breastfeeding promotions towards women less inclined to choose it. Ensuring precise targeting of women with specific characteristics is paramount to optimize resource allocation and, ultimately, enhance the efficacy of the promotional campaign. Consequently, the choice of model should be contingent upon the specific requirements of the problem and the criticality of accurately classifying both positive and negative cases to advance the campaign's success.
-
-# discuss possible limitations of the study that you have conducted which may have have an impact on
-
-Draw some overall conclusions about which method may be more suitable in answering the question of interest and discuss possible limitations of the study that you have conducted which may have have an impact on these conclusions
-
-looking at the counfusion matrix
-
-Given that the class variable is very unbalanced, it is more informative to compare the methods based on the ROC curve. Plot the ROC curves of each model, computing also the areas under the curves (AUCs). Based on the results, which method would you use for future predictions?
-
-The ingredients of the ROC curve are:
-
--   *sensitivity* (or *recall*, or *true positive rate*) = TP / (TP + FN)
--   *specificity* (or *true negative rate*) = TN / (TN + FP)
--   *false positive rate* = FP / (FP + TN) = 1 - specificity
-
-where TP (true positives), TN (true negatives), FP (false positives), and FN (false negatives) are the four cells of the confusion matrix: TP and TN stay on the main diagonal; FP and FN on the antidiagonal.
-
-ROC curves are obtained by plotting the sensitivity vs. the false positive rate, which is 1 - specificity.
-
-In our Caravan example, the "Positive" class corresponds to the target variable being "Yes" (people purchase a policy).
-
-```{r}
-# first, we need to create a "prediction" object
-# I specify ROCR:: to highlight that "prediction()" is part of this library
-predob <- ROCR::prediction(mod1_predict, y_ts)
-# then we need a "performance" object
-perf <- ROCR::performance(predob, "tpr", "fpr")
-# now the plot!
-plot(perf)
-abline(0, 1, col = "gray", lty = 2)
-#
-
-res.auc <- ROCR::performance(predob, "auc")
-res.auc@y.values
+```{r predict_example}
+#| tidy = TRUE
+#probability estimation of the observation
+predict_example <- predict(mod1, newdata = list(pregnancy="Beginning",
+                                                howfed = "Bottle", 
+                                                howfedfr = "Bottle", 
+                                                partner="Partner", 
+                                                smokenow="Yes", 
+                                                smokebf="No",
+                                                age = 24, 
+                                                educat = 18, 
+                                                ethnic="White" ), 
+                           type = "response")
 
 ```
 
-One has to decide how much TPR and FPR you want according to the business problem. If you want to increase TPR, your FPR will also increase eventually. So depending on whether you want to detect all the positives (higher TPR) and willing to incur some error in terms of FPR, you decide the optimal cut-off. The threshold value can then be selected according to the requirement. We would want to reduce the FALSE NEGATIVES as much as possible in our case study; hence, hence, we can choose a threshold value that increases our TPR and reduces our FPR. i.e we can choose a threshold of 0.3 and create a confusion matrix and check the accuracy of the model.
-
-```{r}
-
-cost_perf = performance(predob, "cost")
-predob@cutoffs[[1]][which.min(cost_perf@y.values[[1]])]
-```
-
-The best cutoff optimal value comes out to be 0.49, this will lead to reduction in the FN which is important. But using the threshold value of 0.49, will lead to increase in FP(false positive rate)
-
-# All models are performing equally well, so I would choose one of the simpler
-
-# ones (LDA or LR), as they are less variable and more robust than the more
-
-# complex model (QDA).
+$$\hat{p}(1|X) = \frac{e^{-2.464 -0.002(\text{age=24}) + 0.183 (\text{educat}=18)  -1.662(\text{ethnic}=white) -3.212(\text{smokenow}=Yes)}}{1+e^{-2.464 -0.002(\text{age=24}) + 0.183 (\text{educat}=18)  -1.662(\text{ethnic}=white) -3.212(\text{smokenow}=Yes)}} = `r predict_example`$$ A potential limitation of this conclusion, and so of the study, lies in the sampling method utilized in section 2, impacting K-NN's performance due to dataset imbalance. However, techniques such as class weighting, batching, or resampling could alleviate this issue, enhancing overall model performance on imbalanced datasets.
