@@ -1,7 +1,7 @@
 ---
 title: 'Statistical Learning, Homework #2'
 author: "Jacopo Manenti, id: 247279"
-date: "May 02, 2024"
+date: "May 04, 2024"
 format:
   
     pdf:
@@ -246,7 +246,7 @@ The findings in Figure 2 are logical, as these factors significantly influence P
 
 Finally, we apply boosting regression trees, which construct trees sequentially using information from previous trees. Specifically, we use regression gradient boosting (**BRT**). Similar to random forest, BRT requires preliminary hyperparameter tuning, including selecting optimal values for the learning rate, tree complexity, and number of trees. We determine the optimal number of trees through cross-validation [^1], keeping the first parameter as default and aiming for simplicity with only a few splits, typically resulting in three or four regions. 
 
-[^1]: No boosting cross-validation code reported, as requires little changes from loop in @sec-rf in the fitting function (gbm) and hyperparameter sequence from 50 to 2000. See [GitHub](https://github.com/jacopomanenti01/Statistical-Learnin/blob/main/Homeworks/Homework%202/Homework%202.qmd) for details.
+[^1]: No boosting cross-validation code reported, as requires little changes from loop in @sec-rf in the fitting function (gbm) and hyperparameter sequence from 50 to 2000. See [GitHub](https://github.com/jacopomanenti01/Statistical-Learnin/blob/main/Homeworks/Homework%202/Homework%202.qmd) for more details (lines 250-284).
 ```{r}
 #| include: false
 #| label: cv_bg
@@ -317,7 +317,7 @@ Once we have assessed the optimal configuration for each of our three models, we
 
 In our scenario, both the inner and outer loops utilize 5-fold cross-validation. We will optimize the model based on specific hyperparameters: **mtry** for random forests, **n.trees** for boosting (while retaining default values for other tuning parameters), and **k** as the complexity parameter for pruning. [^2]
 
-[^2]: We have reported nested-cv only for random forest, due to space constraints. The procedure utilized for boosting and pruning was the same. "inner_loop" function performs the inner loop of nested-cv. See [GitHub](https://github.com/jacopomanenti01/Statistical-Learnin/blob/main/Homeworks/Homework%202/Homework%202.qmd) for mode details.
+[^2]: We have reported nested-cv only for random forest, due to space constraints. The procedure utilized for boosting and pruning was the same. "inner_loop" function performs the inner loop of nested-cv. See [GitHub](https://github.com/jacopomanenti01/Statistical-Learnin/blob/main/Homeworks/Homework%202/Homework%202.qmd) for mode details (lines 306-381).
 
 ```{r}
 inner_loop <- function(method, cancer_trn, cancer_tst, tune_grid, hyper, matr, i){
