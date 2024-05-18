@@ -1,0 +1,424 @@
+---
+title: "Homework 3"
+author: "Jacop Manenti"
+date: "May 18, 2024"
+format:
+  
+    pdf:
+        code-overflow: scroll
+        toc: false
+        number-sections: true
+        colorlinks: true
+        include-in-header:
+            text: |
+                \usepackage{fvextra}
+                \DefineVerbatimEnvironment{Highlighting}{Verbatim}{breaklines,commandchars=\\\{\}}
+                \DefineVerbatimEnvironment{OutputCode}{Verbatim}{breaklines,commandchars=\\\{\}}
+    html:
+        code-overflow: scroll
+        theme: cosmo
+        df-print: paged
+        toc: true
+        toc-location: left
+knitr:
+      opts_chunk:
+        warning: false
+        message: false
+        tidy: true
+        tidy.opts:
+            width.cutoff: 80
+editor_options:
+  chunk_output_type: console
+page-footer: 
+    center:
+        href: https://github.com/cararthompson
+        target: _blank
+---
+
+```{r}
+#| label: setup
+#| include: false
+library(conflicted)
+conflicts_prefer(dplyr::select())
+
+# built-in output hook
+hook_output <- knitr::knit_hooks$get("output")
+# custom chunk option output.lines to truncate text output
+knitr::knit_hooks$set(output = function(x, options) {
+  n <- options$output.lines
+  if (!is.null(n)) {
+      x <- xfun::split_lines(x)
+      if(length(x) > n) {
+          top <- head(x, n)
+          bot <- tail(x, n)
+          x <- c(top, "\n....\n", bot)
+      }
+      x <- paste(x, collapse="\n")
+  }
+  hook_output(x, options)
+})
+```
+
+```{r}
+#| label: library
+#| include: false
+# Package names
+packages <- c("tidyverse", "dplyr","ISLR2", "e1071","rsample", "caret","gridExtra","kableExtra","tictoc","ROCR","pROC")
+
+# Install packages not yet installed
+installed_packages <- packages %in% rownames(installed.packages())
+if (any(installed_packages == FALSE)) {
+  install.packages(packages[!installed_packages])
+}
+
+# Packages loading
+invisible(lapply(packages, library, character.only = TRUE))
+```
+
+[GitHub Repository](https://github.com/tuo-nome-utente/tuo-repository)
+
+# Introduction and Data Exploration
+
+In this study, we will use support vector machines (SVMs) to classify leukemia patients into two subgroups. We will evaluate different SMV models and select the one with the highest AUC (area under the curve) making usage of the ROC curve.
+
+Data, store in `gene_expr.tvs`, has been collected from 79 patients and for each it contains 2000 gene expressions. Patients have been divided into those with chromosomal translocations (labeled “1”) and cytogenetically normal (labeled “-1”). Chromosomal translocations are known to be associated with specific types of leukemia and can significantly impact prognosis and treatment response. Identifying patients with these translocations is essential for personalized medicine.
+
+Once the dataset has been imported, we drop the "sampleID" column as it refers to each patient id and is not needed for the scope of the analysis. Since we are performing a classification task, we encode the response variable `y` (the groups) as a factor variable. Each of all the remaning columns represent a gene expression. We then identifying and addressing any missing data.
+
+```{r}
+#| label: dataset
+#| echo: FALSE
+# import data
+leukemia <- read_tsv("gene_expr.tsv") # import data 
+
+# no missing data
+print(paste("Number of na values: ",sum(is.na(leukemia))))
+
+
+# Drop Sample.ID
+leukemia <- leukemia %>% 
+  select(-sampleID) %>% 
+  mutate(y = factor(y))
+
+
+# print dataset
+head(leukemia, 4)
+```
+
+
+# Support Vector Machine {#sec-svm1}
+
+In this section, we will fit four SVMs to perform the classification task. SVMs find the hyperplane that best separates data points of different classes. Depending on their assumptions, SVMs are categorized into:
+
+  *  **Maximal Margin Classifier** (hard svm):  assumes perfectly separable classes. They try to find a linear decision surface by maximizing the distance between the hyperplane and the nearest data point to each class (margin).
+    
+  * **Support Vector Classifier** (soft svm): assumes a linear decision surface but allows some misclassification, meaning classes may not be perfectly separable.
+  
+  * **Support Vector Machine**: extends the support vector classifier to non-linear decision surfaces by mapping features into an higher-dimensional space where points become linearly separable. Depending on the type of higher-dimensional space assumed, we will fit two models using respectivelly `radial kernel` and the `polynomial kernel`.
+
+For each of this model, we will search for the optimal configuration through cross-validation and select the best one based on prediction performance employing ROC Curve. 
+
+In our scenario, the hyperparameters that need tuning are: **cost**, represents the penalty for a margin violation. A smaller value results in wider margins, allowing more misclassifications during fitting; **gamma**, in radial SVM, determines the influence range of a single training example, with low values allowing more flexibility in distances; **degree**, specifies the degree of the polynomial kernel.
+
+Before diving into the search, note that 2 out of 4 models assume linear separability of classes (of different flexibility). To test this assumption and anticipate potential evaluation results, we plotted observations to check if it holds. If it does not, we might expect a low AUC value, thus poor classification performance. Since the dataset has more than three dimensions, we created pairwise plots for the first seven predictors, showing each pair of predictors.
+
+```{r}
+#| echo: false
+#| label: linear-sep
+#| fig-cap: "The figure shows pairwise class comparison between the first 7 predictors. Classes do not seem to be linearly separable."
+attach(leukemia)
+
+leukemia_reduced <- leukemia %>% select(1:7)
+
+# Loop attraverso i nomi delle colonne e creare i plot
+op <- par(mfrow=c(2, 3))
+
+for (i in 1:(ncol(leukemia_reduced)-1)) {
+  
+  j <- i+1
+  # Ottieni i nomi delle due colonne
+  col1 <- names(leukemia_reduced)[i]
+  col2 <- names(leukemia_reduced)[j]
+  
+  x1 <- leukemia_reduced[[col1]]
+  x2 <- leukemia_reduced[[col2]]
+  
+  plot(x1, x2, type = "n", xlab = col1, ylab = col2)
+
+# Aggiungere i punti
+points(x1[y == -1], x2[y == -1], col = "red", pch = 1)
+points(x1[y == 1], x2[y == 1], col = "blue", pch = 6)
+  
+}
+par(op)
+
+
+```
+
+The utility functions for obtaining probabilities to construct the ROC curve and for plotting the ROC curve are the following:
+
+```{r}
+# get the probabilities
+evaluate_model <- function(mod, x_ts) {
+  preds_ts <- predict(mod, x_ts, type="prob", probability =TRUE)
+  cm_ts <- table(x_ts$y, preds_ts)
+  acc_ts <- mean(x_ts$y == preds_ts)
+  err_ts <- mean(x_ts$y != preds_ts)
+  return(preds_ts)
+}
+```
+
+
+```{r}
+#| label: rocplot
+
+# plot ROC curve
+rocplot <- function(pred, truth,x, y, name, ...){ 
+    predob <- prediction(attr(pred, "probabilities")[,2], truth)
+    perf <- performance(predob, "tpr", "fpr")
+    # AUC
+    auc <- performance(predob, measure = "auc")
+    auc_value <- auc@y.values[[1]]
+    plot(perf, ...)
+    text(x, y, paste("AUC ", name, ":", round(auc_value, 3)), col = "black", cex = 0.9)
+}
+```
+
+With everything set, we can now proceed with model selection and evaluation:
+```{r}
+set.seed(1)
+# split the dataset into training and test set
+train_size <- 0.7
+my_split <- initial_split(leukemia, strata = y, prop = train_size)
+leukemia_trn <- training(my_split)
+leukemia_tst <- testing(my_split)
+
+# setting the hyperparameters' value
+cost_range <- c(0.001, 0.01, 0.1, 1, 5, 10, 100)
+gamma_range <- c(0.001, 0.01, 0.1, 0.5, 1, 3, 10)
+poly_range <- c(1, 2, 3,4,5,6,10)
+
+# Start time
+tic()
+# tain control
+tc <- tune.control(cross = 5,random = TRUE)
+
+## Inner loop
+# hard svm
+hard_svm <- svm(y ~ ., data=leukemia_trn, kernel="linear", cost=10e5, scale=FALSE, probability = TRUE)
+    
+# soft smv
+tune.soft <- tune(svm, y ~ ., data=leukemia_trn, kernel="linear", ranges=list(cost=cost_range),tunecontrol = tc)
+opt_cost  <-  tune.soft$best.parameters$cost
+soft_svm_out <- svm(y ~ ., data=leukemia_trn, kernel="linear", cost=opt_cost, scale=FALSE, probability = TRUE)
+
+# radial svm
+tune.radial <- tune(svm, y ~ ., data=leukemia_trn, kernel="radial",ranges=list(cost=cost_range, gamma=gamma_range),tunecontrol = tc)
+opt_radial_cost<-  tune.radial$best.parameters$cost
+opt_gamma<-  tune.radial$best.parameters$gamma
+radial_svm <- svm(y ~ ., data=leukemia_trn, kernel="radial", gamma=opt_gamma, cost=opt_radial_cost, probability = TRUE)
+
+
+# poly svm 
+tune.poly <- tune(svm, y ~ ., data = leukemia_trn, kernel = "poly", ranges = list(cost = cost_range, degree = poly_range ), tunecontrol = tc)
+opt_poly_cost<-  tune.poly$best.parameters$cost
+opt_degree<-  tune.poly$best.parameters$degree
+ply_svm <- svm(y ~ ., data=leukemia_trn, kernel="poly", cost=opt_poly_cost, degree=opt_degree, probability=TRUE)
+
+# prediction
+
+fitted.soft.opt <- evaluate_model(soft_svm_out,leukemia_tst)
+fitted.hard.opt <- evaluate_model(hard_svm,leukemia_tst)
+fitted.radial.opt <- evaluate_model(radial_svm,leukemia_tst)
+fitted.poly.opt <- evaluate_model(ply_svm,leukemia_tst)
+
+# time
+elapsed_time <- toc(log = TRUE)
+time <- round((elapsed_time$toc - elapsed_time$tic),3)
+```
+
+
+```{r}
+#| echo: FALSE
+#| label: roc
+#| fig-cap: "The figure shows ROC curve obtained by fitting and evaluating models on **leukemia** dataset. We have also reported the AUC value of each model."
+
+rocplot(fitted.soft.opt, leukemia_tst$y, main="Training Data", x= 0.87 , y = 0.45, name = "soft")
+rocplot(fitted.hard.opt, leukemia_tst$y, add=T, col="red", , x= 0.87 , y = 0.55, name = "hard")
+rocplot(fitted.radial.opt, leukemia_tst$y, add=T, col="blue", , x= 0.87 , y = 0.65, name = "radial")
+rocplot(fitted.poly.opt, leukemia_tst$y, add=T, col="green", , x= 0.87 , y = 0.75, name = "poly")
+abline(0, 1, col = "violet", lty = 1)
+legend("bottomright", legend=c("soft svm", "hard svm", "Radial svm", "poly svm", "random model"), col=c("black", "red", "blue", "green", "violet"),cex = 0.5 ,lty=1)
+
+```
+
+
+In the procedure above we used 5-fold cross-validation and random hyperparameter search for efficiency, reducing runtime from $\approx 20$ to  `r round(time/60,3)` minutes compared to 10 folds and grid search.
+
+Figure 2 shows the ROC curve, which compares model performance across all decision thresholds. It highlights whether a model produces too many false positives or negatives, crucial in medical diagnosis. The main diagonal represents performances of a random model. The best model on test data has the largest AUC, which in this case corresponds to the **Soft SVM**. It better discriminates best between patients with and without chromosomal translocations, minimizing false positives and negatives.
+
+As the dataset contains 2000 predictors, poor performance of other models (like radial) might be related to the "curse of dimensionality"—issues: it refers to a family of problems that arise when analyzing and organizing data in high-dimensional spaces, such as increased computational cost, overfitting, and reduced generalization capability. To mitigate this effect, in the next section we will perform feature selection.
+
+# Feature selection
+
+To reduce the dimensionality of the `leukemia` dataset, we will use a common technique in gene expression analysis: discarding genes with low expression variability. This variability is measured by the standard deviation. We will first compute it for each gene and then filter the dataset, retaining only those in the top 5%.
+
+```{r}
+# compute standard deviation
+gene_sd<- apply(leukemia[, 1:2000], 2, sd )
+# cut off 5%
+cutoff <- quantile(gene_sd, 0.95)
+# select top 5%
+top_genes <- which(gene_sd >= cutoff)
+top_sd <- gene_sd[top_genes]
+# filter the dataset and include column y
+leukemia_sd <- leukemia %>% 
+  select(, c(top_genes, 2001))
+
+# get dimensions
+d <- dim(leukemia_sd)
+print(paste("After having filtered, the dataset has", d[1],d[2], "dimension"))
+
+```
+
+```{r}
+#| label: fig-charts
+#| echo: FALSE
+#| fig-subcap: 
+#| - "The figure shows a boxplot of the genes' standard deviations. The values up to the third quartile (Q3) do not exceed 0.5, indicating that most predictors have low expression level."
+#| - "The barplot shows the top 5% of genes by standard deviation, categorized into three groups based on their standard deviation values. The majority of these high-variability genes fall into the second group."
+#| layout-ncol: 2
+
+
+
+boxplot(gene_sd, main = "Boxplot of Gene sd", 
+        ylab = "Standard Deviation", col = "lightgreen")
+
+group_sd <-  cut(top_sd,breaks = c(0, min(top_sd), mean(top_sd), max(top_sd) ))
+
+barplot(table(group_sd), main = "Barplot of top 5% Gene", ylab = "Counts", col = "lightgreen", cex.names = 0.6)
+
+```
+
+We are now ready to repeat the analysis conducted in section @sec-svm1 using the filtered dataset `leukemia_sd` and the same algorithm. This time, we used 10-fold cross-validation and grid search because the reduced dimensionality of the dataset significantly decreases the optimization time to $\approx 27$ seconds.
+
+```{r}
+#| echo: FALSE
+
+set.seed(1)
+# split the dataset into training and test set
+train_size <- 0.7
+my_split <- initial_split(leukemia_sd, strata = y, prop = train_size)
+leukemia_trn <- training(my_split)
+leukemia_tst <- testing(my_split)
+
+# setting the hyperparameters' value
+cost_range <- c(0.001, 0.01, 0.1, 1, 5, 10, 100)
+gamma_range <- c(0.001, 0.01, 0.1, 0.5, 1, 3, 10)
+poly_range <- c(1, 2, 3,4,5,6,10)
+
+## Inner loop
+# hard svm
+hard_svm <- svm(y ~ ., data=leukemia_trn, kernel="linear", cost=10e5, scale=FALSE, probability = TRUE)
+    
+# soft smv
+tune.soft <- tune(svm, y ~ ., data=leukemia_trn, kernel="linear", ranges=list(cost=cost_range))
+opt_cost  <-  tune.soft$best.parameters$cost
+soft_svm_out <- svm(y ~ ., data=leukemia_trn, kernel="linear", cost=opt_cost, scale=FALSE, probability = TRUE)
+
+# radial 
+tune.radial <- tune(svm, y ~ ., data=leukemia_trn, kernel="radial",ranges=list(cost=cost_range, gamma=gamma_range))
+opt_radial_cost<-  tune.radial$best.parameters$cost
+opt_gamma<-  tune.radial$best.parameters$gamma
+radial_svm <- svm(y ~ ., data=leukemia_trn, kernel="radial", gamma=opt_gamma, cost=opt_radial_cost, probability = TRUE)
+
+
+# poly svm 
+tune.poly <- tune(svm, y ~ ., data = leukemia_trn, kernel = "poly", ranges = list(cost = cost_range, degree = poly_range ))
+opt_poly_cost<-  tune.poly$best.parameters$cost
+opt_degree<-  tune.poly$best.parameters$degree
+ply_svm <- svm(y ~ ., data=leukemia_trn, kernel="poly", cost=opt_poly_cost, degree=opt_degree, probability=TRUE)
+
+# predition
+
+fitted.soft.opt <- evaluate_model(soft_svm_out,leukemia_tst)
+fitted.hard.opt <- evaluate_model(hard_svm,leukemia_tst)
+fitted.radial.opt <- evaluate_model(radial_svm,leukemia_tst)
+fitted.poly.opt <- evaluate_model(ply_svm,leukemia_tst)
+
+```
+
+
+```{r}
+#| echo: FALSE
+#| label: roc2
+#| fig-cap: "The figure shows the ROC curve obtained by fitting and evaluating models on **leukemia_sd**. We have also reported the AUC value of each model."
+
+rocplot(fitted.soft.opt, leukemia_tst$y, main="Training Data", x= 0.87 , y = 0.45, name = "soft")
+rocplot(fitted.hard.opt, leukemia_tst$y, add=T, col="red", , x= 0.87 , y = 0.55, name = "hard")
+rocplot(fitted.radial.opt, leukemia_tst$y, add=T, col="blue", , x= 0.87 , y = 0.65, name = "radial")
+rocplot(fitted.poly.opt, leukemia_tst$y, add=T, col="green", , x= 0.87 , y = 0.75, name = "poly")
+abline(0, 1, col = "violet", lty = 1)
+legend("bottomright", legend=c("soft svm", "hard svm", "Radial svm", "poly svm", "random model"), col=c("black", "red", "blue", "green", "violet"),cex = 0.5 ,lty=1)
+
+```
+
+The new ROC curve in Figure 4 leads to similar conclusions as before, with the **Soft SVM** remaining the optimal model. However, note that the performance of the Radial SVM has improved significantly. Previously, it was only slightly better than a random model, but now it shows a substantial divergence. This confirms our hypothesis that the curse of dimensionality negatively impacted performances due to the presence of noisy predictors.
+
+# Conclusions
+
+In this study, we examined four methods for predicting the group to which a leukemia patient belongs. We began by optimizing and selecting models using the leukemia dataset with all predictors. We then tested the hypothesis of the curse of dimensionality by filtering the dataset to retain only genes with high expression. Finally, we repeated the model optimization and selection process to identify the best model for the classification task.
+
+
+The final model is a **Soft Margin SVM** with the optimal hyperparameter `r opt_cost`. We will now use this model to classify points into their respective classes. The final results are reported in Table 1. The `leukemia_sd dataset` was used, with a 70/30 split for training and testing, respectively.
+
+```{r}
+set.seed(1)
+# split the dataset into training and test set
+train_size <- 0.7
+my_split <- initial_split(leukemia_sd, strata = y, prop = train_size)
+leukemia_trn <- training(my_split)
+leukemia_tst <- testing(my_split)
+
+# fit soft svm 
+soft.svm <- svm(y ~ ., data=leukemia_trn, kernel="linear", cost=opt_cost)
+# predictions
+soft.pred <- predict(soft.svm, newdata=leukemia_tst)
+
+# summary 
+summary(soft.svm)
+
+```
+
+```{r}
+#| label: tbl-performance
+#| echo: FALSE
+#| tbl-cap: "Performance evaluation"
+#| tbl-subcap: ["Confusion matrix for the optimal soft svm", "Accuracy, True positive and False positive rate for the optimal soft svm"]
+#| layout-ncol: 2
+
+# conf, matrix, accuracy, pred.error 
+conf_mtr <- table(leukemia_tst$y, soft.pred)
+acc_ts <- mean(leukemia_tst$y== soft.pred)
+tpr <- conf_mtr[4]/(conf_mtr[4]+conf_mtr[3] )
+fpr <- conf_mtr[2]/(conf_mtr[4]+conf_mtr[2] )
+
+# create a dataframe
+df2<- rbind(acc_ts,tpr,fpr)
+# convert to a table
+summary_tbl <- as.table(df2)
+
+row.names(conf_mtr) <- c("pred -1","pred 1")
+colnames(conf_mtr) <- c("true -1","true 1")
+
+# plot
+kable(conf_mtr)
+kable(summary_tbl, col.names = "soft svm")
+
+```
+
+
+
+
+
+
