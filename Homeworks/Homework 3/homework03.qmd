@@ -1,6 +1,6 @@
 ---
-title: "Homework 3"
-author: "Jacop Manenti"
+title: "Statistical Learning, Homework #3"
+author: "Jacop Manenti, id: 247279"
 date: "May 18, 2024"
 format:
   
@@ -75,7 +75,7 @@ if (any(installed_packages == FALSE)) {
 invisible(lapply(packages, library, character.only = TRUE))
 ```
 
-[GitHub Repository](https://github.com/tuo-nome-utente/tuo-repository)
+[GitHub Repository](https://github.com/jacopomanenti01/Statistical-Learning/tree/main/Homeworks/Homework%203)
 
 # Introduction and Data Exploration
 
@@ -243,7 +243,7 @@ time <- round((elapsed_time$toc - elapsed_time$tic),3)
 #| label: roc
 #| fig-cap: "The figure shows ROC curve obtained by fitting and evaluating models on **leukemia** dataset. We have also reported the AUC value of each model."
 
-rocplot(fitted.soft.opt, leukemia_tst$y, main="Training Data", x= 0.87 , y = 0.45, name = "soft")
+rocplot(fitted.soft.opt, leukemia_tst$y, main="ROC curve on test set", x= 0.87 , y = 0.45, name = "soft")
 rocplot(fitted.hard.opt, leukemia_tst$y, add=T, col="red", , x= 0.87 , y = 0.55, name = "hard")
 rocplot(fitted.radial.opt, leukemia_tst$y, add=T, col="blue", , x= 0.87 , y = 0.65, name = "radial")
 rocplot(fitted.poly.opt, leukemia_tst$y, add=T, col="green", , x= 0.87 , y = 0.75, name = "poly")
@@ -354,7 +354,7 @@ fitted.poly.opt <- evaluate_model(ply_svm,leukemia_tst)
 #| label: roc2
 #| fig-cap: "The figure shows the ROC curve obtained by fitting and evaluating models on **leukemia_sd**. We have also reported the AUC value of each model."
 
-rocplot(fitted.soft.opt, leukemia_tst$y, main="Training Data", x= 0.87 , y = 0.45, name = "soft")
+rocplot(fitted.soft.opt, leukemia_tst$y, main="ROC curve on test set", x= 0.87 , y = 0.45, name = "soft")
 rocplot(fitted.hard.opt, leukemia_tst$y, add=T, col="red", , x= 0.87 , y = 0.55, name = "hard")
 rocplot(fitted.radial.opt, leukemia_tst$y, add=T, col="blue", , x= 0.87 , y = 0.65, name = "radial")
 rocplot(fitted.poly.opt, leukemia_tst$y, add=T, col="green", , x= 0.87 , y = 0.75, name = "poly")
@@ -370,7 +370,7 @@ The new ROC curve in Figure 4 leads to similar conclusions as before, with the *
 In this study, we examined four methods for predicting the group to which a leukemia patient belongs. We began by optimizing and selecting models using the leukemia dataset with all predictors. We then tested the hypothesis of the curse of dimensionality by filtering the dataset to retain only genes with high expression. Finally, we repeated the model optimization and selection process to identify the best model for the classification task.
 
 
-The final model is a **Soft Margin SVM** with the optimal hyperparameter `r opt_cost`. We will now use this model to classify points into their respective classes. The final results are reported in Table 1. The `leukemia_sd dataset` was used, with a 70/30 split for training and testing, respectively.
+The final model is a **Soft Margin SVM** with the optimal hyperparameter cost =`r opt_cost`. We will now use this model to classify points into their respective classes. The final results are reported in Table 1. The `leukemia_sd dataset` was used, with a 70/30 split for training and testing, respectively.
 
 ```{r}
 set.seed(1)
@@ -384,9 +384,6 @@ leukemia_tst <- testing(my_split)
 soft.svm <- svm(y ~ ., data=leukemia_trn, kernel="linear", cost=opt_cost)
 # predictions
 soft.pred <- predict(soft.svm, newdata=leukemia_tst)
-
-# summary 
-summary(soft.svm)
 
 ```
 
@@ -415,6 +412,11 @@ colnames(conf_mtr) <- c("true -1","true 1")
 kable(conf_mtr)
 kable(summary_tbl, col.names = "soft svm")
 
+```
+
+```{r}
+# print optimal soft svm summary 
+print(summary(soft.svm))
 ```
 
 
